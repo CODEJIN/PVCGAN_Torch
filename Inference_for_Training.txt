@@ -1,0 +1,4 @@
+File	Singer	Start_Index	End_Index
+C:/Pattern/PN.Pattern.NUS48E/NUS48E.JLEE05.PICKLE	0	0	1600
+C:/Pattern/PN.Pattern.NUS48E/NUS48E.JLEE05.PICKLE	1	0	1600
+C:/Pattern/PN.Pattern.NUS48E/NUS48E.JLEE05.PICKLE	2	0	1600
