@@ -193,7 +193,6 @@ class Train_Collater:
         noises = torch.randn(size= audios.size()) # [Batch, Time]
 
         return audios, mels, pitches, audio_Singers, mel_Singers, noises
-        
 
 class Dev_Collater:
     def __call__(self, batch):

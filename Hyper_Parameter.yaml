@@ -85,8 +85,8 @@ Train:
             Decay_Rate: 0.5
     Adversarial_Weight:
         Discriminator: 4.0
-        Singer_Classification: 0.01
-        Pitch_Regression: 0.1
+        Singer_Classification: 1.0
+        Pitch_Regression: 1.0
     Discriminator_Delay: 100000
     ADAM:
         Beta1: 0.9

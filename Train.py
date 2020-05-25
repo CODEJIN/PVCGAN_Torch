@@ -146,6 +146,7 @@ class Trainer:
                 gamma= hp_Dict['Train']['Learning_Rate']['Confuser']['Decay_Rate'],
                 )
             }
+
         logging.info(self.model_Dict['Generator'])
         logging.info(self.model_Dict['Discriminator'])
         logging.info(self.model_Dict['Encoder'])
@@ -205,6 +206,11 @@ class Trainer:
         loss_Dict['Confuser'] = \
             hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Singer'] + \
             hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Pitch']
+
+        loss_Dict['Singer_Acc'] = torch.mean(torch.eq(
+            torch.argmax(singer_Logits, dim= 1),
+            mel_Singers,
+            ).type(torch.FloatTensor))
 
         self.optimizer_Dict['Confuser'].zero_grad()
         loss_Dict['Confuser'].backward()
@@ -305,6 +311,11 @@ class Trainer:
                 )
             loss_Dict['Generator'] += hp_Dict['Train']['Adversarial_Weight']['Discriminator'] * loss_Dict['Adversarial']
                        
+        loss_Dict['Singer_Acc'] = torch.mean(torch.eq(
+            torch.argmax(singer_Logits, dim= 1),
+            singers,
+            ).type(torch.FloatTensor))
+
         if self.steps > hp_Dict['Train']['Discriminator_Delay']:
             real_Discriminations = self.model_Dict['Discriminator'](audios)
             fake_Discriminations = self.model_Dict['Discriminator'](fake_Audios.detach())
@@ -489,12 +500,17 @@ class Trainer:
 
         self.model_Dict['Generator'].load_state_dict(state_Dict['Model']['Generator'])
         self.model_Dict['Discriminator'].load_state_dict(state_Dict['Model']['Discriminator'])
+        self.model_Dict['Encoder'].load_state_dict(state_Dict['Model']['Encoder'])
+        self.model_Dict['Singer_Classification_Network'].load_state_dict(state_Dict['Model']['Singer_Classification_Network'])
+        self.model_Dict['Pitch_Regression_Network'].load_state_dict(state_Dict['Model']['Pitch_Regression_Network'])
         
         self.optimizer_Dict['Generator'].load_state_dict(state_Dict['Optimizer']['Generator'])
         self.optimizer_Dict['Discriminator'].load_state_dict(state_Dict['Optimizer']['Discriminator'])
+        self.optimizer_Dict['Confuser'].load_state_dict(state_Dict['Optimizer']['Confuser'])
 
         self.scheduler_Dict['Generator'].load_state_dict(state_Dict['Scheduler']['Generator'])
         self.scheduler_Dict['Discriminator'].load_state_dict(state_Dict['Scheduler']['Discriminator'])
+        self.scheduler_Dict['Confuser'].load_state_dict(state_Dict['Scheduler']['Confuser'])
         
         self.steps = state_Dict['Steps']
         self.epochs = state_Dict['Epochs']
@@ -508,14 +524,19 @@ class Trainer:
             'Model': {
                 'Generator': self.model_Dict['Generator'].state_dict(),
                 'Discriminator': self.model_Dict['Discriminator'].state_dict(),
+                'Encoder': self.model_Dict['Encoder'].state_dict(),
+                'Singer_Classification_Network': self.model_Dict['Singer_Classification_Network'].state_dict(),
+                'Pitch_Regression_Network': self.model_Dict['Pitch_Regression_Network'].state_dict(),
                 },
             'Optimizer': {
                 'Generator': self.optimizer_Dict['Generator'].state_dict(),
                 'Discriminator': self.optimizer_Dict['Discriminator'].state_dict(),
+                'Confuser': self.optimizer_Dict['Confuser'].state_dict(),
                 },
             'Scheduler': {
                 'Generator': self.scheduler_Dict['Generator'].state_dict(),
                 'Discriminator': self.scheduler_Dict['Discriminator'].state_dict(),
+                'Confuser': self.scheduler_Dict['Confuser'].state_dict(),
                 },
             'Steps': self.steps,
             'Epochs': self.epochs,
