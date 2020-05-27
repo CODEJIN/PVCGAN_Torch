@@ -67,11 +67,12 @@ class TrainDataset(torch.utils.data.Dataset):
             self.original_Pattern_List + \
             self.mixup_Pattern_List + \
             self.back_Translate_Pattern_List
+        pattern_List *= hp_Dict['Train']['Accumulation_Inverval']
 
         return pattern_List[idx]
 
     def __len__(self):
-        return len(
+        return hp_Dict['Train']['Accumulation_Inverval'] * len(
             self.original_Pattern_List +
             self.mixup_Pattern_List +
             self.back_Translate_Pattern_List

@@ -78,15 +78,15 @@ Train:
             Epsilon: 1.0e-6
             Decay_Step: 200000
             Decay_Rate: 0.5
+            Adversarial_Weight:
+                Discriminator: 4.0
+                Singer_Classification: 0.1
+                Pitch_Regression: 0.1
         Confuser : 
-            Initial: 1.0e-4
-            Epsilon: 1.0e-6
+            Initial: 1.0e-3
+            Epsilon: 1.0e-5
             Decay_Step: 200000
-            Decay_Rate: 0.5
-    Adversarial_Weight:
-        Discriminator: 4.0
-        Singer_Classification: 1.0
-        Pitch_Regression: 1.0
+            Decay_Rate: 0.5    
     Discriminator_Delay: 100000
     ADAM:
         Beta1: 0.9
