@@ -314,10 +314,7 @@ class Post_Encoder(torch.nn.Module):
             num_embeddings= hp_Dict['Num_Singers'],
             embedding_dim= hp_Dict['Post_Encoder']['Prenet']['Singer_Channels'],
             ))  # [Batch, Singer_Dim]
-        self.layer_Dict['Singer_Prenet'].add_module('Unsqueeze', Unsqueeze(dim= 2))  # [Batch, Singer_Dim, 1]
-        self.layer_Dict['Singer_Prenet'].add_module('Upsample', torch.nn.Upsample(
-            scale_factor= self.layer_Dict['Mel_Prenet'].size(1)
-            ))  # [Batch, Singer_Dim, Time]
+        self.layer_Dict['Singer_Prenet'].add_module('Unsqueeze', Unsqueeze(dim= 2))  # [Batch, Singer_Dim, 1]        
         
         self.layer_Dict['Pitch_Prenet'] = torch.nn.Sequential()
         self.layer_Dict['Pitch_Prenet'].add_module('Unsqueeze', Unsqueeze(dim= 1))  # [Batch, 1, Time]
@@ -357,7 +354,7 @@ class Post_Encoder(torch.nn.Module):
     def forward(self, encodings, singers, pitches):
         x = torch.cat([
             self.layer_Dict['Mel_Prenet'](encodings),
-            self.layer_Dict['Singer_Prenet'](singers),
+            self.layer_Dict['Singer_Prenet'](singers).repeat([1,1,pitches.size(2)]),
             self.layer_Dict['Pitch_Prenet'](pitches)
             ], dim= 1)
         
