@@ -10,24 +10,12 @@ Sound:
 
 Num_Singers: 6
 
-Pre_Encoder:
+Encoder:
     Blocks: 3
     Stacks_in_Block: 5
     Channels: 128
     Kernel_Size: 3
     Dropout_Rate: 0.0
-
-Post_Encoder:
-    Prenet:
-        Mel_Channels: 128
-        Pitch_Channels: 64
-        Singer_Channels: 64
-    Blocks: 3
-    Stacks_in_Block: 10
-    Channels: 128
-    Kernel_Size: 3
-    Dropout_Rate: 0.0
-    
 
 Singer_Classification:
     Dropout_Rate: 0.2
@@ -51,7 +39,7 @@ WaveNet:
     Upsample:
         Scales: [4, 4, 4, 4]
         Pad: 2
-    
+    Singer_Embedding: 64
 
 Discriminator:
     Stacks: 10

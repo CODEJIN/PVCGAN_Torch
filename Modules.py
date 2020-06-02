@@ -27,9 +27,7 @@ class Generator(torch.nn.Module):
                     residual_channels= hp_Dict['WaveNet']['Residual_Channels'],
                     gate_channels= hp_Dict['WaveNet']['ResConvGLU']['Gate_Channels'],
                     skip_channels= hp_Dict['WaveNet']['ResConvGLU']['Skip_Channels'],
-                    aux_channels= hp_Dict['Encoder']['Channels'],
-                    singer_channels= hp_Dict['WaveNet']['Singer_Embedding'],
-                    pitch_channels= 1,                    
+                    aux_channels= hp_Dict['Post_Encoder']['Channels'],
                     kernel_size= hp_Dict['WaveNet']['ResConvGLU']['Kernel_Size'],
                     dilation= 2 ** stack_Index,
                     dropout= hp_Dict['WaveNet']['ResConvGLU']['Dropout_Rate'],
@@ -53,32 +51,16 @@ class Generator(torch.nn.Module):
 
         self.layer_Dict['Upsample'] = UpsampleNet()
 
-        self.layer_Dict['Singer_Embedding'] = torch.nn.Sequential()
-        self.layer_Dict['Singer_Embedding'].add_module('Embedding', torch.nn.Embedding(
-            num_embeddings= hp_Dict['Num_Singers'],
-            embedding_dim= hp_Dict['WaveNet']['Singer_Embedding']
-            ))
-        self.layer_Dict['Singer_Embedding'].add_module('Unsqueeze', Unsqueeze(dim= 2))
-
-        self.layer_Dict['Pitch_Upsample'] = torch.nn.Sequential()        
-        self.layer_Dict['Pitch_Upsample'].add_module('Upsample', LinearUpsample1D(
-            scale= hp_Dict['Sound']['Frame_Shift']
-            ))
-        self.layer_Dict['Pitch_Upsample'].add_module('Unsqueeze', Unsqueeze(dim= 1))  #[Batch, 1, Time]
-
-
         self.apply_weight_norm()
         
-    def forward(self, x, auxs, singers, pitches):
+    def forward(self, x, auxs):
         auxs = self.layer_Dict['Upsample'](auxs)
-        singers = self.layer_Dict['Singer_Embedding'](singers)
-        pitches = self.layer_Dict['Pitch_Upsample'](pitches)        
 
         x = self.layer_Dict['First'](x)
         skips = 0
         for block_Index in range(hp_Dict['WaveNet']['ResConvGLU']['Blocks']):
             for stack_Index in range(hp_Dict['WaveNet']['ResConvGLU']['Stacks_in_Block']):
-                x, new_Skips = self.layer_Dict['ResConvGLU_{}_{}'.format(block_Index, stack_Index)](x, auxs, singers, pitches)
+                x, new_Skips = self.layer_Dict['ResConvGLU_{}_{}'.format(block_Index, stack_Index)](x, auxs)
                 skips += new_Skips
         skips *= math.sqrt(1.0 / (hp_Dict['WaveNet']['ResConvGLU']['Blocks'] * hp_Dict['WaveNet']['ResConvGLU']['Stacks_in_Block']))
 
@@ -162,32 +144,32 @@ class Discriminator(torch.nn.Module):
         self.apply(_remove_weight_norm)
 
 
-class Encoder(torch.nn.Module):
+class Pre_Encoder(torch.nn.Module):
     def __init__(self):
-        super(Encoder, self).__init__()
+        super(Pre_Encoder, self).__init__()
         self.layer = torch.nn.Sequential()
 
         self.layer.add_module('Prenet', Conv1d(
             in_channels= hp_Dict['Sound']['Mel_Dim'],
-            out_channels= hp_Dict['Encoder']['Channels'],
-            kernel_size= hp_Dict['Encoder']['Kernel_Size'],
-            padding= (hp_Dict['Encoder']['Kernel_Size'] - 1) // 2,
+            out_channels= hp_Dict['Pre_Encoder']['Channels'],
+            kernel_size= hp_Dict['Pre_Encoder']['Kernel_Size'],
+            padding= (hp_Dict['Pre_Encoder']['Kernel_Size'] - 1) // 2,
             bias= True
             ))
         self.layer.add_module('ReLU', torch.nn.ReLU(
             inplace= True
             ))
-        for index in range(hp_Dict['Encoder']['Blocks']):
+        for index in range(hp_Dict['Pre_Encoder']['Blocks']):
             self.layer.add_module('Block_{}'.format(index), Encoder_Block(
-                num_layers= hp_Dict['Encoder']['Stacks_in_Block'],
-                channels= hp_Dict['Encoder']['Channels'],
-                kernel_size= hp_Dict['Encoder']['Kernel_Size'],
-                dropout= hp_Dict['Encoder']['Dropout_Rate'],
+                num_layers= hp_Dict['Pre_Encoder']['Stacks_in_Block'],
+                channels= hp_Dict['Pre_Encoder']['Channels'],
+                kernel_size= hp_Dict['Pre_Encoder']['Kernel_Size'],
+                dropout= hp_Dict['Pre_Encoder']['Dropout_Rate'],
                 bias= True
                 ))
         self.layer.add_module('Postnet1xd', Conv1d1x1(
-            in_channels= hp_Dict['Encoder']['Channels'],
-            out_channels= hp_Dict['Encoder']['Channels'],
+            in_channels= hp_Dict['Pre_Encoder']['Channels'],
+            out_channels= hp_Dict['Pre_Encoder']['Channels'],
             bias= True
             ))
 
@@ -202,7 +184,7 @@ class Singer_Classification_Network(torch.nn.Module):
         self.layer.add_module('Dropout', torch.nn.Dropout(
             p= hp_Dict['Singer_Classification']['Dropout_Rate']
             ))
-        previous_Channels = hp_Dict['Encoder']['Channels']
+        previous_Channels = hp_Dict['Pre_Encoder']['Channels']
         
         for index, (channels, kernel_size) in enumerate(zip(
             hp_Dict['Singer_Classification']['Channels'],
@@ -257,8 +239,8 @@ class Pitch_Regression_Network(torch.nn.Module):
         self.layer = torch.nn.Sequential()
         
         self.layer.add_module('Indent_Conv', Conv1d(
-            in_channels= hp_Dict['Encoder']['Channels'],
-            out_channels= hp_Dict['Encoder']['Channels'],
+            in_channels= hp_Dict['Pre_Encoder']['Channels'],
+            out_channels= hp_Dict['Pre_Encoder']['Channels'],
             kernel_size= hp_Dict['WaveNet']['Upsample']['Pad'] * 2 + 1,
             bias= False
             ))  # To match to the pitch length by no padding
@@ -267,7 +249,7 @@ class Pitch_Regression_Network(torch.nn.Module):
             p= hp_Dict['Pitch_Regression']['Dropout_Rate']
             ))
         
-        previous_Channels = hp_Dict['Encoder']['Channels']
+        previous_Channels = hp_Dict['Pre_Encoder']['Channels']
         for index, (channels, kernel_size) in enumerate(zip(
             hp_Dict['Pitch_Regression']['Channels'],
             hp_Dict['Pitch_Regression']['Kernel_Size']
@@ -315,20 +297,82 @@ class Pitch_Regression_Network(torch.nn.Module):
         self.apply(_remove_weight_norm)
 
 
+class Post_Encoder(torch.nn.Module):
+    def __init__(self):
+        super(Post_Encoder, self).__init__()
+        
+        self.layer_Dict = torch.nn.ModuleDict()        
+        self.layer_Dict['Mel_Prenet'] = Conv1d(
+            in_channels= hp_Dict['Pre_Encoder']['Channels'],
+            out_channels= hp_Dict['Post_Encoder']['Prenet']['Mel_Channels'],
+            kernel_size= hp_Dict['WaveNet']['Upsample']['Pad'] * 2 + 1,
+            bias= False
+            )  # [Batch, Mel_dim, Time + 2*Pad] -> [Batch, Mel_dim, Time]
+
+        self.layer_Dict['Singer_Prenet'] = torch.nn.Sequential()
+        self.layer_Dict['Singer_Prenet'].add_module('Embedding', torch.nn.Embedding(
+            num_embeddings= hp_Dict['Num_Singers'],
+            embedding_dim= hp_Dict['Post_Encoder']['Prenet']['Singer_Channels'],
+            ))  # [Batch, Singer_Dim]
+        self.layer_Dict['Singer_Prenet'].add_module('Unsqueeze', Unsqueeze(dim= 2))  # [Batch, Singer_Dim, 1]
+        self.layer_Dict['Singer_Prenet'].add_module('Upsample', torch.nn.Upsample(
+            scale_factor= self.layer_Dict['Mel_Prenet'].size(1)
+            ))  # [Batch, Singer_Dim, Time]
+        
+        self.layer_Dict['Pitch_Prenet'] = torch.nn.Sequential()
+        self.layer_Dict['Pitch_Prenet'].add_module('Unsqueeze', Unsqueeze(dim= 1))  # [Batch, 1, Time]
+        self.layer_Dict['Pitch_Prenet'].add_module('Conv', Conv1d1x1(
+            in_channels= 1,
+            out_channels= hp_Dict['Post_Encoder']['Prenet']['Pitch_Channels'],
+            bias= False
+            ))  # [Batch, Pitch_Dim, Time]
+        
+        self.layer_Dict['Encoder'] = torch.nn.Sequential()
+        self.layer_Dict['Encoder'].add_module('Prenet', Conv1d(
+            in_channels= sum([
+                hp_Dict['Post_Encoder']['Prenet']['Mel_Channels'],
+                hp_Dict['Post_Encoder']['Prenet']['Singer_Channels'],
+                hp_Dict['Post_Encoder']['Prenet']['Pitch_Channels']
+                ]),
+            out_channels= hp_Dict['Post_Encoder']['Channels'],
+            kernel_size= hp_Dict['Post_Encoder']['Kernel_Size'],
+            padding= (hp_Dict['Post_Encoder']['Kernel_Size'] - 1) // 2,
+            bias= True
+            ))  # Channel correction for residual
+        for index in range(hp_Dict['Post_Encoder']['Blocks']):
+            self.layer_Dict['Encoder'].add_module('Block_{}'.format(index), Encoder_Block(
+                num_layers= hp_Dict['Post_Encoder']['Stacks_in_Block'],
+                channels= hp_Dict['Post_Encoder']['Channels'],
+                kernel_size= hp_Dict['Post_Encoder']['Kernel_Size'],
+                dropout= hp_Dict['Post_Encoder']['Dropout_Rate'],
+                bias= True,
+                residual= True
+                ))
+        self.layer_Dict['Encoder'].add_module('Postnet1xd', Conv1d1x1(
+            in_channels= hp_Dict['Post_Encoder']['Channels'],
+            out_channels= hp_Dict['Post_Encoder']['Channels'],
+            bias= True
+            ))
+
+    def forward(self, encodings, singers, pitches):
+        x = torch.cat([
+            self.layer_Dict['Mel_Prenet'](encodings),
+            self.layer_Dict['Singer_Prenet'](singers),
+            self.layer_Dict['Pitch_Prenet'](pitches)
+            ], dim= 1)
+        
+        return self.layer_Dict['Encoder'](x)
+
+
+
 class UpsampleNet(torch.nn.Module):
     def __init__(self):
         super(UpsampleNet, self).__init__()
 
         self.layer = torch.nn.Sequential()
-        self.layer.add_module('First', Conv1d(
-            in_channels= hp_Dict['Encoder']['Channels'],
-            out_channels= hp_Dict['Encoder']['Channels'],
-            kernel_size= hp_Dict['WaveNet']['Upsample']['Pad'] * 2 + 1,
-            bias= False
-            ))  # [Batch, Mel_dim, Time]
-        self.layer.add_module('Unsqueeze', Unsqueeze(dim= 1))    # [Batch, 1, Mel_dim, Time]
+        self.layer.add_module('Unsqueeze', Unsqueeze(dim= 1))    # [Batch, 1, Encoder_Dim, Time]
         for index, scale in enumerate(hp_Dict['WaveNet']['Upsample']['Scales']):
-            self.layer.add_module('Stretch_{}'.format(index), Stretch2d(scale, 1, mode='nearest'))  # [Batch, 1, Mel_dim, Scaled_Time]
+            self.layer.add_module('Stretch_{}'.format(index), Stretch2d(scale, 1, mode='nearest'))  # [Batch, 1, Encoder_Dim, Scaled_Time]
             self.layer.add_module('Conv2d_{}'.format(index), Conv2d(
                 in_channels= 1,
                 out_channels= 1,
@@ -336,9 +380,9 @@ class UpsampleNet(torch.nn.Module):
                 padding= (0, scale),
                 bias= False
                 ))  # [Batch, 1, Mel_dim, Scaled_Time]
-        self.layer.add_module('Squeeze', Squeeze(dim= 1))    # [Batch, Mel_dim, Scaled_Time]
+        self.layer.add_module('Squeeze', Squeeze(dim= 1))    # [Batch, Encoder_Dim, Scaled_Time]
 
-    def forward(self, x):        
+    def forward(self, x):
         return self.layer(x)
 
 class ResConvGLU(torch.nn.Module):
@@ -348,8 +392,6 @@ class ResConvGLU(torch.nn.Module):
         gate_channels,
         skip_channels,
         aux_channels,
-        singer_channels,
-        pitch_channels,
         kernel_size,
         dilation= 1,
         dropout= 0.0,
@@ -375,18 +417,6 @@ class ResConvGLU(torch.nn.Module):
             bias= False
             )
         
-        self.layer_Dict['Singer'] = Conv1d1x1(
-            in_channels= singer_channels,
-            out_channels= gate_channels,
-            bias= False
-            )
-
-        self.layer_Dict['Pitch'] = Conv1d1x1(
-            in_channels= pitch_channels,
-            out_channels= gate_channels,
-            bias= False
-            )
-
         self.layer_Dict['Out'] = Conv1d1x1(
             in_channels= gate_channels // 2,
             out_channels= residual_channels,
@@ -408,14 +438,8 @@ class ResConvGLU(torch.nn.Module):
         auxs = self.layer_Dict['Aux'](auxs)
         auxs_Tanh, auxs_Sigmoid = auxs.split(auxs.size(1) // 2, dim= 1)
 
-        singers = self.layer_Dict['Singer'](singers)
-        singers_Tanh, singers_Sigmoid = singers.split(singers.size(1) // 2, dim= 1)
-
-        pitches = self.layer_Dict['Pitch'](pitches)
-        pitches_Tanh, pitches_Sigmoid = pitches.split(pitches.size(1) // 2, dim= 1)
-
-        audios_Tanh = torch.tanh(audios_Tanh + auxs_Tanh + singers_Tanh + pitches_Tanh)
-        audios_Sigmoid = torch.sigmoid(audios_Sigmoid + auxs_Sigmoid + singers_Sigmoid + pitches_Sigmoid)
+        audios_Tanh = torch.tanh(audios_Tanh + auxs_Tanh)
+        audios_Sigmoid = torch.sigmoid(audios_Sigmoid + auxs_Sigmoid)
         audios = audios_Tanh * audios_Sigmoid 
 
         outs = (self.layer_Dict['Out'](audios) + residuals) * math.sqrt(0.5)
@@ -431,7 +455,8 @@ class Encoder_Block(torch.nn.Module):
         channels,
         kernel_size,
         dropout= 0.0,
-        bias= True
+        bias= True,
+        residual= False
         ):
         super(Encoder_Block, self).__init__()
 
@@ -442,7 +467,8 @@ class Encoder_Block(torch.nn.Module):
                 kernel_size= kernel_size,
                 dilation= 2 ** index,
                 dropout= dropout,
-                bias= bias
+                bias= bias,
+                residual= residual
                 ))
 
     def forward(self, x):
@@ -455,9 +481,11 @@ class Encoder_Layer(torch.nn.Module):
         kernel_size,
         dilation= 1,
         dropout= 0.0,
-        bias= True
+        bias= True,
+        residual= False
         ):
         super(Encoder_Layer, self).__init__()
+        self.residual = residual
 
         self.layer = torch.nn.Sequential()
         self.layer.add_module('ReLU_0', torch.nn.ReLU(
@@ -488,7 +516,7 @@ class Encoder_Layer(torch.nn.Module):
         self.layer.add_module('Tanh', torch.nn.Tanh())
 
     def forward(self, x):
-        return self.layer(x)
+        return self.layer(x) + (x if self.residual else 0)
 
 class MultiResolutionSTFTLoss(torch.nn.Module):
     def __init__(
@@ -568,7 +596,6 @@ class STFTLoss(torch.nn.Module):
         return torch.norm(y_magnitude - x_magnitude, p='fro') / torch.norm(y_magnitude, p='fro')
 
 
-        
 class Stretch2d(torch.nn.Module):
     def __init__(self, x_scale, y_scale, mode= 'nearest'):
         super(Stretch2d, self).__init__()
