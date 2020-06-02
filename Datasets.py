@@ -151,13 +151,14 @@ class Accumulation_Collater:
             singers.append(singer)
 
         total_Audios = [audio for audio, _, _, _ in batch]
+        total_Pitches = [pitch for _, _, pitch, _ in batch]
         audios = torch.FloatTensor(np.stack(audios, axis= 0))   # [Batch, Time]
         mels = torch.FloatTensor(np.stack(mels, axis= 0)).transpose(2, 1)   # [Batch, Time, Mel_dim] -> [Batch, Mel_dim, Time]
         pitches = torch.FloatTensor(np.stack(pitches, axis= 0))   # [Batch, Time]
         singers = torch.LongTensor(np.stack(singers, axis= 0))   # [Batch]
         noises = noises = torch.randn(size= audios.size()) # [Batch, Time]
 
-        return total_Audios, audios, mels, pitches, singers, noises
+        return total_Audios, total_Pitches, audios, mels, pitches, singers, noises
 
 class Train_Collater:
     def __init__(self):
