@@ -194,7 +194,7 @@ class Trainer:
         self.optimizer_Dict['Generator'].zero_grad()
         loss_Dict['Generator'].backward()
         torch.nn.utils.clip_grad_norm_(
-            parameters= list(self.model_Dict['Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
+            parameters= list(self.model_Dict['Pre_Encoder'].parameters()) + list(self.model_Dict['Post_Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
             max_norm= hp_Dict['Train']['Generator_Gradient_Norm']
             )
         self.optimizer_Dict['Generator'].step()

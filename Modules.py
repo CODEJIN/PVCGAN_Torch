@@ -354,7 +354,7 @@ class Post_Encoder(torch.nn.Module):
     def forward(self, encodings, singers, pitches):
         x = torch.cat([
             self.layer_Dict['Mel_Prenet'](encodings),
-            self.layer_Dict['Singer_Prenet'](singers).repeat([1,1,pitches.size(2)]),
+            self.layer_Dict['Singer_Prenet'](singers).repeat(1,1,pitches.size(1)),
             self.layer_Dict['Pitch_Prenet'](pitches)
             ], dim= 1)
         
@@ -426,7 +426,7 @@ class ResConvGLU(torch.nn.Module):
             bias= bias
             )
 
-    def forward(self, audios, auxs, singers, pitches):
+    def forward(self, audios, auxs):
         residuals = audios
 
         audios = self.layer_Dict['Conv1d'](audios)
