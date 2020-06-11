@@ -10,24 +10,12 @@ Sound:
 
 Num_Singers: 6
 
-Pre_Encoder:
-    Blocks: 3
-    Stacks_in_Block: 5
+Encoder:
+    Blocks: 2
+    Stacks_in_Block: 3
     Channels: 128
     Kernel_Size: 3
     Dropout_Rate: 0.0
-
-Post_Encoder:
-    Prenet:
-        Mel_Channels: 128
-        Pitch_Channels: 64
-        Singer_Channels: 64
-    Blocks: 3
-    Stacks_in_Block: 10
-    Channels: 128
-    Kernel_Size: 3
-    Dropout_Rate: 0.0
-    
 
 Singer_Classification:
     Dropout_Rate: 0.2
@@ -51,12 +39,12 @@ WaveNet:
     Upsample:
         Scales: [4, 4, 4, 4]
         Pad: 2
-    
+    Singer_Embedding: 64
 
 Discriminator:
     Stacks: 10
     Channels: 64
-    Kernel_Size: 3
+    Kernel_Size: 3    
 
 STFT_Loss_Resolution:
     FFT_Sizes: [1024, 2048, 512]
@@ -73,14 +61,14 @@ Train:
     Back_Translate:
         Use: true
         Apply_Delay: 0
-    Pattern_Path: 'C:/Pattern/PN.Pattern.NUS48E'
+    Pattern_Path: '../Pattern/PN.Pattern.NUS48E'
     Metadata_File: 'METADATA.PICKLE'
     Num_Workers: 2
     Batch_Size: 6
     Wav_Length: 25600
-    Max_Pattern_Queue: 100
+    Max_Pattern_Queue: 100          
     Learning_Rate:
-        Discriminator:
+        Discriminator: 
             Initial: 5.0e-5
             Epsilon: 1.0e-6
             Decay_Step: 200000
@@ -119,7 +107,7 @@ Train:
     Initial_Inference: false
 
 Use_Mixed_Precision: false
-Inference_Path: 'D:/PVCGAN.Results/Inference'
-Checkpoint_Path: 'D:/PVCGAN.Results/Checkpoint'
-Log_Path: 'D:/PVCGAN.Results/Log'
+Inference_Path: './Results/Inference'
+Checkpoint_Path: './Results/Checkpoint'
+Log_Path: './Results/Log'
 Device: '0'

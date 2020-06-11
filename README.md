@@ -1,3 +1,5 @@
+__※ This project has been discontinued. If you would like to suggest any improvements, please register as an issue.__
+
 # Parallel Voice Conversion GAN
 
 This code is an implementation of Parallel Voice Conversion GAN(PVCGAN). The algorithm is based on the following papers:
@@ -104,6 +106,31 @@ python Train.py -s <int>
 
 # Result
 
+* JLEE -> JLEE (original)
+
+![Figure_0](./Example_Results/Figures/Step-400000.IDX_0.PNG)
+
+* JLEE -> JTAN (original)
+
+![Figure_0](./Example_Results/Figures/Step-400000.IDX_1.PNG)
+
+* JLEE -> KENN (original)
+
+![Figure_0](./Example_Results/Figures/Step-400000.IDX_2.PNG)
+
+* JLEE -> SAMF (original)
+
+![Figure_0](./Example_Results/Figures/Step-400000.IDX_3.PNG)
+
+* JLEE -> VKOW (original)
+
+![Figure_0](./Example_Results/Figures/Step-400000.IDX_4.PNG)
+
+* JLEE -> ZHIY (original)
+
+![Figure_0](./Example_Results/Figures/Step-400000.IDX_5.PNG)
+
 # Trained checkpoint
 
-# Future works
+* [Checkpoint](./Example_Results/Checkpoint/S_400000.pkl)
+* [Hyper parameter](./Example_Results/Checkpoint/Hyper_Parameters.yaml)

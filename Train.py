@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import choice
 
-from Modules import Pre_Encoder, Post_Encoder, Singer_Classification_Network, Pitch_Regression_Network, Generator, Discriminator, MultiResolutionSTFTLoss
+from Modules import Encoder, Singer_Classification_Network, Pitch_Regression_Network, Generator, Discriminator, MultiResolutionSTFTLoss
 from Datasets import AccumulationDataset, TrainDataset, DevDataset, Accumulation_Collater, Train_Collater, Dev_Collater
 from Radam import RAdam
 
@@ -97,8 +97,7 @@ class Trainer:
         self.model_Dict = {
             'Generator': Generator().to(device),
             'Discriminator': Discriminator().to(device),
-            'Pre_Encoder': Pre_Encoder().to(device),
-            'Post_Encoder': Post_Encoder().to(device),
+            'Encoder': Encoder().to(device),
             'Singer_Classification_Network': Singer_Classification_Network().to(device),
             'Pitch_Regression_Network': Pitch_Regression_Network().to(device),
             }
@@ -115,7 +114,7 @@ class Trainer:
         
         self.optimizer_Dict = {
             'Generator': RAdam(
-                params= list(self.model_Dict['Pre_Encoder'].parameters()) + list(self.model_Dict['Post_Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
+                params= list(self.model_Dict['Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
                 lr= hp_Dict['Train']['Learning_Rate']['Generator']['Initial'],
                 eps= hp_Dict['Train']['Learning_Rate']['Generator']['Epsilon'],
                 ),
@@ -150,8 +149,7 @@ class Trainer:
 
         logging.info(self.model_Dict['Generator'])
         logging.info(self.model_Dict['Discriminator'])
-        logging.info(self.model_Dict['Pre_Encoder'])
-        logging.info(self.model_Dict['Post_Encoder'])
+        logging.info(self.model_Dict['Encoder'])
         logging.info(self.model_Dict['Singer_Classification_Network'])
         logging.info(self.model_Dict['Pitch_Regression_Network'])
 
@@ -166,16 +164,15 @@ class Trainer:
         noises = noises.to(device)
 
         # Generator
-        pre_Encodings = self.model_Dict['Pre_Encoder'](mels)
-        post_Encodings = self.model_Dict['Post_Encoder'](pre_Encodings, audio_Singers, pitches)
-        fake_Audios = self.model_Dict['Generator'](noises, post_Encodings)
+        encodings = self.model_Dict['Encoder'](mels)
+        fake_Audios = self.model_Dict['Generator'](noises, encodings, audio_Singers, pitches)
 
         loss_Dict['Spectral_Convergence'], loss_Dict['Magnitude'] = self.criterion_Dict['STFT'](fake_Audios, audios)
         loss_Dict['Generator'] = loss_Dict['Spectral_Convergence'] + loss_Dict['Magnitude']
 
         if self.steps >= hp_Dict['Train']['Confuser_Delay']:
-            singer_Logits = self.model_Dict['Singer_Classification_Network'](pre_Encodings)
-            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](pre_Encodings)
+            singer_Logits = self.model_Dict['Singer_Classification_Network'](encodings)
+            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](encodings)
             loss_Dict['Singer'] = self.criterion_Dict['CE'](singer_Logits, mel_Singers)        
             loss_Dict['Pitch'] = self.criterion_Dict['MAE'](pitch_Logits, pitches)
             loss_Dict['Confuser'] = \
@@ -194,7 +191,7 @@ class Trainer:
         self.optimizer_Dict['Generator'].zero_grad()
         loss_Dict['Generator'].backward()
         torch.nn.utils.clip_grad_norm_(
-            parameters= list(self.model_Dict['Pre_Encoder'].parameters()) + list(self.model_Dict['Post_Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
+            parameters= list(self.model_Dict['Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
             max_norm= hp_Dict['Train']['Generator_Gradient_Norm']
             )
         self.optimizer_Dict['Generator'].step()
@@ -202,8 +199,8 @@ class Trainer:
         
         # Confuser
         if self.steps >= hp_Dict['Train']['Confuser_Delay']:
-            singer_Logits = self.model_Dict['Singer_Classification_Network'](pre_Encodings.detach())
-            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](pre_Encodings.detach())
+            singer_Logits = self.model_Dict['Singer_Classification_Network'](encodings.detach())
+            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](encodings.detach())
             loss_Dict['Singer'] = self.criterion_Dict['CE'](singer_Logits, mel_Singers)        
             loss_Dict['Pitch'] = self.criterion_Dict['MAE'](pitch_Logits, pitches)
             loss_Dict['Confuser'] = \
@@ -293,16 +290,14 @@ class Trainer:
         singers = singers.to(device)
         noises = noises.to(device)
 
-        
-        pre_Encodings = self.model_Dict['Pre_Encoder'](mels)
-        post_Encodings = self.model_Dict['Post_Encoder'](pre_Encodings, singers, pitches)
-        fake_Audios = self.model_Dict['Generator'](noises, post_Encodings)
+        encodings = self.model_Dict['Encoder'](mels)
+        fake_Audios = self.model_Dict['Generator'](noises, encodings, singers, pitches)
         loss_Dict['Spectral_Convergence'], loss_Dict['Magnitude'] = self.criterion_Dict['STFT'](fake_Audios, audios)
         loss_Dict['Generator'] = loss_Dict['Spectral_Convergence'] + loss_Dict['Magnitude']
         
         if self.steps >= hp_Dict['Train']['Confuser_Delay']:
-            singer_Logits = self.model_Dict['Singer_Classification_Network'](pre_Encodings)
-            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](pre_Encodings)        
+            singer_Logits = self.model_Dict['Singer_Classification_Network'](encodings)
+            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](encodings)        
             loss_Dict['Singer'] = self.criterion_Dict['CE'](singer_Logits, singers)        
             loss_Dict['Pitch'] = self.criterion_Dict['MAE'](pitch_Logits, pitches)
             loss_Dict['Confuser'] = \
@@ -348,9 +343,8 @@ class Trainer:
         singers = singers.to(device)
         noises = noises.to(device)
 
-        pre_Encodings = self.model_Dict['Pre_Encoder'](mels)
-        post_Encodings = self.model_Dict['Post_Encoder'](pre_Encodings, singers, pitches)
-        fakes = self.model_Dict['Generator'](noises, post_Encodings).cpu().numpy()
+        encodings = self.model_Dict['Encoder'](mels)
+        fakes = self.model_Dict['Generator'](noises, encodings, singers, pitches).cpu().numpy()
 
         os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps)).replace("\\", "/"), exist_ok= True)
 
@@ -403,9 +397,8 @@ class Trainer:
         singers = singers.to(device)
         noises = noises.to(device)
 
-        pre_Encodings = self.model_Dict['Pre_Encoder'](mels)
-        post_Encodings = self.model_Dict['Post_Encoder'](pre_Encodings, singers, pitches)
-        return self.model_Dict['Generator'](noises, post_Encodings).cpu().numpy()
+        encodings = self.model_Dict['Encoder'](mels)
+        return self.model_Dict['Generator'](noises, encodings, singers, pitches).cpu().numpy()
 
     def Data_Accumulation(self):
         def Mixup(audio, pitch):
@@ -508,8 +501,7 @@ class Trainer:
 
         self.model_Dict['Generator'].load_state_dict(state_Dict['Model']['Generator'])
         self.model_Dict['Discriminator'].load_state_dict(state_Dict['Model']['Discriminator'])
-        self.model_Dict['Pre_Encoder'].load_state_dict(state_Dict['Model']['Pre_Encoder'])
-        self.model_Dict['Post_Encoder'].load_state_dict(state_Dict['Model']['Post_Encoder'])
+        self.model_Dict['Encoder'].load_state_dict(state_Dict['Model']['Encoder'])
         self.model_Dict['Singer_Classification_Network'].load_state_dict(state_Dict['Model']['Singer_Classification_Network'])
         self.model_Dict['Pitch_Regression_Network'].load_state_dict(state_Dict['Model']['Pitch_Regression_Network'])
         
@@ -533,8 +525,7 @@ class Trainer:
             'Model': {
                 'Generator': self.model_Dict['Generator'].state_dict(),
                 'Discriminator': self.model_Dict['Discriminator'].state_dict(),
-                'Pre_Encoder': self.model_Dict['Pre_Encoder'].state_dict(),
-                'Post_Encoder': self.model_Dict['Post_Encoder'].state_dict(),
+                'Encoder': self.model_Dict['Encoder'].state_dict(),
                 'Singer_Classification_Network': self.model_Dict['Singer_Classification_Network'].state_dict(),
                 'Pitch_Regression_Network': self.model_Dict['Pitch_Regression_Network'].state_dict(),
                 },
