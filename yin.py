@@ -100,9 +100,9 @@ def getPitch(cmdf, tau_min, tau_max, harmo_th=0.1):
 
     return 0    # if unvoiced
 
-
+# Heejo added pad parameters to match the length to the librosa stft func.
 def compute_yin(sig, sr, w_len=512, w_step=256, f0_min=100, f0_max=500,
-                harmo_thresh=0.1):
+                harmo_thresh=0.1, center = True, pad_mode='reflect', n_fft=2048):
     """
 
     Compute the Yin Algorithm. Return fundamental frequency and harmonic rate.
@@ -123,6 +123,8 @@ def compute_yin(sig, sr, w_len=512, w_step=256, f0_min=100, f0_max=500,
         * times: list of time of each estimation
     :rtype: tuple
     """
+    if center:
+        sig = np.pad(sig, (w_step + w_len - sig.shape[0] % w_step) // 2, mode=pad_mode)
 
     tau_min = int(sr / f0_max)
     tau_max = int(sr / f0_min)
@@ -175,9 +177,8 @@ def pitch_calc(
         w_step= 256,
         harmo_thresh= 1 - confidence_threshold
         )[0]
-
-    pitch = gaussian_filter1d(pitch, sigma= gaussian_smoothing_sigma)
-    pitch /= np.max(pitch) + 1e-8
-
+    if gaussian_smoothing_sigma > 0.0:
+        pitch = gaussian_filter1d(pitch, sigma= gaussian_smoothing_sigma)
+    
     return pitch
     

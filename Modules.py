@@ -3,10 +3,47 @@ import torch.nn.functional as F
 import numpy as np
 import yaml, math, logging
 
+from Gradient_Reversal_Layer import GRL
 
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
+class PVCGAN(torch.nn.Module):
+    def __init__(self):
+        super(PVCGAN, self).__init__()
+
+        self.layer_Dict = torch.nn.ModuleDict({
+            'Encoder': Encoder(),
+            'Generator': Generator(),
+            'Singer_Classification_Network': torch.nn.Sequential(
+                GRL(),
+                Singer_Classification_Network()
+                ),
+            'Pitch_Regression_Network': torch.nn.Sequential(
+                GRL(),
+                Pitch_Regression_Network()
+                ),
+            'Discriminator': Discriminator()
+            })        
+        self.layer_Dict['Discriminator_for_Fake'] = torch.nn.Sequential(
+            GRL(),
+            self.layer_Dict['Discriminator']
+            )
+
+    def forward(self, mels, pitches, singers, noises, discrimination= False, reals= None):
+        encodings = self.layer_Dict['Encoder'](mels)
+        fakes = self.layer_Dict['Generator'](noises, encodings, singers, pitches)
+
+        classified_Singers = self.layer_Dict['Singer_Classification_Network'](encodings)
+        classified_Pitches = self.layer_Dict['Pitch_Regression_Network'](encodings)
+
+        fakes_Discriminations = None
+        reals_Discriminations = None
+        if discrimination:
+            fakes_Discriminations = self.layer_Dict['Discriminator_for_Fake'](fakes)
+            reals_Discriminations = self.layer_Dict['Discriminator'](reals)
+
+        return fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations
 
 class Generator(torch.nn.Module):
     def __init__(self):
@@ -185,7 +222,7 @@ class Encoder(torch.nn.Module):
                 dropout= hp_Dict['Encoder']['Dropout_Rate'],
                 bias= True
                 ))
-        self.layer.add_module('Postnet1xd', Conv1d1x1(
+        self.layer.add_module('Postnet', Conv1d1x1(
             in_channels= hp_Dict['Encoder']['Channels'],
             out_channels= hp_Dict['Encoder']['Channels'],
             bias= True
@@ -284,7 +321,7 @@ class Pitch_Regression_Network(torch.nn.Module):
                 ))
             previous_Channels = channels
         
-        self.layer.add_module('Conv1d1x1', Conv1d1x1(   # Why linear cannot select the dim? Because NCW(NCHW) is main, this function should be supported...
+        self.layer.add_module('Conv1d1x1', Conv1d1x1(
             in_channels= previous_Channels,
             out_channels= 1,
             bias= True
@@ -490,6 +527,7 @@ class Encoder_Layer(torch.nn.Module):
     def forward(self, x):
         return self.layer(x)
 
+
 class MultiResolutionSTFTLoss(torch.nn.Module):
     def __init__(
         self,
@@ -499,30 +537,30 @@ class MultiResolutionSTFTLoss(torch.nn.Module):
         window= torch.hann_window
         ):
         super(MultiResolutionSTFTLoss, self).__init__()
+        self.layer_List = torch.nn.ModuleList()
 
         for index, (fft_Size, shift_Length, win_Length) in enumerate(zip(
             fft_sizes,
             shift_lengths,
             win_lengths
-            )):
-            self.layer_Dict = torch.nn.ModuleDict()
-            self.layer_Dict['STFTLoss_{}'.format(index)] = STFTLoss(
+            )):            
+            self.layer_List.append(STFTLoss(
                 fft_size= fft_Size,
                 shift_length= shift_Length,
                 win_length= win_Length,
                 window= window
-                )
+                ))
 
     def forward(self, x, y):
         spectral_Convergence_Loss = 0.0
         magnitude_Loss = 0.0
-        for layer in self.layer_Dict.values():
+        for layer in self.layer_List:
             new_Spectral_Convergence_Loss, new_Magnitude_Loss = layer(x, y)
             spectral_Convergence_Loss += new_Spectral_Convergence_Loss
             magnitude_Loss += new_Magnitude_Loss
 
-        spectral_Convergence_Loss /= len(self.layer_Dict)
-        magnitude_Loss /= len(self.layer_Dict)
+        spectral_Convergence_Loss /= len(self.layer_List)
+        magnitude_Loss /= len(self.layer_List)
 
         return spectral_Convergence_Loss, magnitude_Loss
 

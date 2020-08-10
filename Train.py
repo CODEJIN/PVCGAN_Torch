@@ -1,21 +1,22 @@
 import torch
 import numpy as np
-import logging, yaml, os, sys, argparse, time
+import logging, yaml, os, sys, argparse, time, math
 from tqdm import tqdm
 from collections import defaultdict
 from tensorboardX import SummaryWriter
 import matplotlib
-# matplotlib.use('agg')
+matplotlib.use('agg')
 matplotlib.rcParams['agg.path.chunksize'] = 10000
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from random import choice
 
-from Modules import Encoder, Singer_Classification_Network, Pitch_Regression_Network, Generator, Discriminator, MultiResolutionSTFTLoss
+from Modules import PVCGAN, MultiResolutionSTFTLoss
 from Datasets import AccumulationDataset, TrainDataset, DevDataset, Accumulation_Collater, Train_Collater, Dev_Collater
 from Radam import RAdam
+from Noam_Scheduler import Modified_Noam_Scheduler
 
-from Audio import melspectrogram
+from Pattern_Generator import Pattern_Generate
 from yin import pitch_calc
 
 with open('Hyper_Parameter.yaml') as f:
@@ -32,26 +33,37 @@ else:
     torch.cuda.set_device(0)
 
 logging.basicConfig(
-        level=logging.INFO, stream=sys.stdout,
-        format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s")
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
+    )
+
+if hp_Dict['Use_Mixed_Precision']:
+    try:
+        from apex import amp
+    except:
+        logging.info('There is no apex modules in the environment. Mixed precision does not work.')
+        hp_Dict['Use_Mixed_Precision'] = False
 
 class Trainer:
     def __init__(self, steps= 0):
         self.steps = steps
         self.epochs = 0
 
-        self.writer = SummaryWriter(hp_Dict['Log_Path'])
-
-        self.Datset_Generate()        
+        self.Datset_Generate()
         self.Model_Generate()
 
-        self.loss_Dict = {
+        self.scalar_Dict = {
             'Train': defaultdict(float),
             'Evaluation': defaultdict(float),
             }
 
-        if self.steps > 0:
-            self.Load_Checkpoint()
+        self.writer_Dict = {
+            'Train': SummaryWriter(os.path.join(hp_Dict['Log_Path'], 'Train')),
+            'Evaluation': SummaryWriter(os.path.join(hp_Dict['Log_Path'], 'Evaluation')),
+            }
+
+        self.Load_Checkpoint()
 
     def Datset_Generate(self):
         accumulation_Dataset = AccumulationDataset()
@@ -91,16 +103,8 @@ class Trainer:
             pin_memory= True
             )
 
-        self.train_Dataset = train_Dataset
-
     def Model_Generate(self):
-        self.model_Dict = {
-            'Generator': Generator().to(device),
-            'Discriminator': Discriminator().to(device),
-            'Encoder': Encoder().to(device),
-            'Singer_Classification_Network': Singer_Classification_Network().to(device),
-            'Pitch_Regression_Network': Pitch_Regression_Network().to(device),
-            }
+        self.model = PVCGAN().to(device, )
         self.criterion_Dict = {
             'STFT': MultiResolutionSTFTLoss(
                 fft_sizes= hp_Dict['STFT_Loss_Resolution']['FFT_Sizes'],
@@ -112,46 +116,24 @@ class Trainer:
             'MAE': torch.nn.L1Loss().to(device)
             }
         
-        self.optimizer_Dict = {
-            'Generator': RAdam(
-                params= list(self.model_Dict['Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
-                lr= hp_Dict['Train']['Learning_Rate']['Generator']['Initial'],
-                eps= hp_Dict['Train']['Learning_Rate']['Generator']['Epsilon'],
-                ),
-            'Discriminator': RAdam(
-                params= self.model_Dict['Discriminator'].parameters(),
-                lr= hp_Dict['Train']['Learning_Rate']['Discriminator']['Initial'],
-                eps= hp_Dict['Train']['Learning_Rate']['Discriminator']['Epsilon'],
-                ),
-            'Confuser': RAdam(
-                params= list(self.model_Dict['Singer_Classification_Network'].parameters()) + list(self.model_Dict['Pitch_Regression_Network'].parameters()),
-                lr= hp_Dict['Train']['Learning_Rate']['Confuser']['Initial'],
-                eps= hp_Dict['Train']['Learning_Rate']['Confuser']['Epsilon'],
-                )
-            }
-        self.scheduler_Dict = {
-            'Generator': torch.optim.lr_scheduler.StepLR(
-                optimizer= self.optimizer_Dict['Generator'],
-                step_size= hp_Dict['Train']['Learning_Rate']['Generator']['Decay_Step'],
-                gamma= hp_Dict['Train']['Learning_Rate']['Generator']['Decay_Rate'],
-                ),
-            'Discriminator': torch.optim.lr_scheduler.StepLR(
-                optimizer= self.optimizer_Dict['Discriminator'],
-                step_size= hp_Dict['Train']['Learning_Rate']['Discriminator']['Decay_Step'],
-                gamma= hp_Dict['Train']['Learning_Rate']['Discriminator']['Decay_Rate'],
-                ),
-            'Confuser': torch.optim.lr_scheduler.StepLR(
-                optimizer= self.optimizer_Dict['Confuser'],
-                step_size= hp_Dict['Train']['Learning_Rate']['Confuser']['Decay_Step'],
-                gamma= hp_Dict['Train']['Learning_Rate']['Confuser']['Decay_Rate'],
-                )
-            }
+        self.optimizer = RAdam(
+            params= self.model.parameters(),
+            lr= hp_Dict['Train']['Learning_Rate']['Initial'],
+            betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
+            eps= hp_Dict['Train']['ADAM']['Epsilon'],
+            )
+        self.scheduler = Modified_Noam_Scheduler(
+            optimizer= self.optimizer,
+            base= hp_Dict['Train']['Learning_Rate']['Base']
+            )
 
-        logging.info(self.model_Dict['Generator'])
-        logging.info(self.model_Dict['Discriminator'])
-        logging.info(self.model_Dict['Encoder'])
-        logging.info(self.model_Dict['Singer_Classification_Network'])
-        logging.info(self.model_Dict['Pitch_Regression_Network'])
+        if hp_Dict['Use_Mixed_Precision']:
+            self.model, self.optimizer = amp.initialize(
+                models=self.model,
+                optimizers=self.optimizer
+                )
+
+        logging.info(self.model)
 
     def Train_Step(self, audios, mels, pitches, audio_Singers, mel_Singers, noises):
         loss_Dict = {}
@@ -164,91 +146,52 @@ class Trainer:
         noises = noises.to(device)
 
         # Generator
-        encodings = self.model_Dict['Encoder'](mels)
-        fake_Audios = self.model_Dict['Generator'](noises, encodings, audio_Singers, pitches)
-
-        loss_Dict['Spectral_Convergence'], loss_Dict['Magnitude'] = self.criterion_Dict['STFT'](fake_Audios, audios)
-        loss_Dict['Generator'] = loss_Dict['Spectral_Convergence'] + loss_Dict['Magnitude']
-
-        if self.steps >= hp_Dict['Train']['Confuser_Delay']:
-            singer_Logits = self.model_Dict['Singer_Classification_Network'](encodings)
-            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](encodings)
-            loss_Dict['Singer'] = self.criterion_Dict['CE'](singer_Logits, mel_Singers)        
-            loss_Dict['Pitch'] = self.criterion_Dict['MAE'](pitch_Logits, pitches)
-            loss_Dict['Confuser'] = \
-                hp_Dict['Train']['Adversarial_Weight']['Singer_Classification']['Generator'] * loss_Dict['Singer'] + \
-                hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression']['Generator'] * loss_Dict['Pitch']
-            loss_Dict['Generator'] -= loss_Dict['Confuser']
-
-        if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            fake_Discriminations = self.model_Dict['Discriminator'](fake_Audios)
-            loss_Dict['Adversarial'] = self.criterion_Dict['MSE'](
-                fake_Discriminations,
-                fake_Discriminations.new_ones(fake_Discriminations.size())
-                )
-            loss_Dict['Generator'] += hp_Dict['Train']['Adversarial_Weight']['Discriminator'] * loss_Dict['Adversarial']
-                
-        self.optimizer_Dict['Generator'].zero_grad()
-        loss_Dict['Generator'].backward()
-        torch.nn.utils.clip_grad_norm_(
-            parameters= list(self.model_Dict['Encoder'].parameters()) + list(self.model_Dict['Generator'].parameters()),
-            max_norm= hp_Dict['Train']['Generator_Gradient_Norm']
+        fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
+            mels= mels,
+            pitches= pitches,
+            singers= audio_Singers,
+            noises= noises,
+            discrimination= self.steps >= hp_Dict['Train']['Discriminator_Delay'],
+            reals= audios
             )
-        self.optimizer_Dict['Generator'].step()
-        self.scheduler_Dict['Generator'].step()
+
+        loss_Dict['Generator/Spectral_Convergence'], loss_Dict['Generator/Magnitude'] = self.criterion_Dict['STFT'](fakes, audios)
+        loss_Dict['Generator'] = loss_Dict['Generator/Spectral_Convergence'] + loss_Dict['Generator/Magnitude']
         
-        # Confuser
-        if self.steps >= hp_Dict['Train']['Confuser_Delay']:
-            singer_Logits = self.model_Dict['Singer_Classification_Network'](encodings.detach())
-            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](encodings.detach())
-            loss_Dict['Singer'] = self.criterion_Dict['CE'](singer_Logits, mel_Singers)        
-            loss_Dict['Pitch'] = self.criterion_Dict['MAE'](pitch_Logits, pitches)
-            loss_Dict['Confuser'] = \
-                hp_Dict['Train']['Adversarial_Weight']['Singer_Classification']['Confuser'] * loss_Dict['Singer'] + \
-                hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression']['Confuser'] * loss_Dict['Pitch']
-            loss_Dict['Singer_Acc'] = torch.mean(torch.eq(
-                torch.argmax(singer_Logits, dim= 1),
-                mel_Singers,
-                ).type(torch.FloatTensor))
+        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
+        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
+        loss_Dict['Confuser'] = loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
 
-            self.optimizer_Dict['Confuser'].zero_grad()
-            loss_Dict['Confuser'].backward()
-            torch.nn.utils.clip_grad_norm_(
-                parameters= list(self.model_Dict['Singer_Classification_Network'].parameters()) + list(self.model_Dict['Pitch_Regression_Network'].parameters()),
-                max_norm= hp_Dict['Train']['Confuser_Gradient_Norm']
-                )
-            self.optimizer_Dict['Confuser'].step()
-            self.scheduler_Dict['Confuser'].step()
-
-        # Discriminator
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            real_Discriminations = self.model_Dict['Discriminator'](audios)
-            fake_Discriminations = self.model_Dict['Discriminator'](fake_Audios.detach())
+            loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # As the discriminator, negative is correct.
+            loss_Dict['Discriminator/Real'] = -torch.mean(reals_Discriminations)  # As the discriminator, positive is correct.
+            loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
+                
+        self.optimizer.zero_grad()
+        loss = loss_Dict['Generator'] + loss_Dict['Confuser'] + loss_Dict['Discriminator']
 
-            loss_Dict['Real'] = self.criterion_Dict['MSE'](
-                real_Discriminations,
-                real_Discriminations.new_ones(real_Discriminations.size())
-                )
-            loss_Dict['Fake'] = self.criterion_Dict['MSE'](
-                fake_Discriminations,
-                fake_Discriminations.new_zeros(fake_Discriminations.size())
-                )
-            loss_Dict['Discriminator'] = loss_Dict['Real'] + loss_Dict['Fake']
-
-            self.optimizer_Dict['Discriminator'].zero_grad()
-            loss_Dict['Discriminator'].backward()
+        if hp_Dict['Use_Mixed_Precision']:
+            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                parameters= self.model_Dict['Discriminator'].parameters(),
-                max_norm= hp_Dict['Train']['Discriminator_Gradient_Norm']
+                parameters= amp.master_params(self.optimizer),
+                max_norm= hp_Dict['Train']['Gradient_Norm']
                 )
-            self.optimizer_Dict['Discriminator'].step()
-            self.scheduler_Dict['Discriminator'].step()
-        
+        else:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                parameters= self.model.parameters(),
+                max_norm= hp_Dict['Train']['Gradient_Norm']
+                )
+
+        self.optimizer.step()
+        self.scheduler.step()
+
         self.steps += 1
         self.tqdm.update(1)
 
         for tag, loss in loss_Dict.items():
-            self.loss_Dict['Train'][tag] += loss
+            self.scalar_Dict['Train']['Loss/{}'.format(tag)] += loss
 
     def Train_Epoch(self):
         if any([
@@ -281,74 +224,68 @@ class Trainer:
 
     
     @torch.no_grad()
-    def Evaluation_Step(self, audios, mels, pitches, singers, noises):
+    def Evaluation_Step(self, audios, mels, pitches, audio_Singers, mel_Singers, noises):
         loss_Dict = {}
 
-        audios = audios.to(device)
-        mels = mels.to(device)
-        pitches = pitches.to(device)
-        singers = singers.to(device)
-        noises = noises.to(device)
+        audios = audios.to(device, non_blocking=True)
+        mels = mels.to(device, non_blocking=True)
+        pitches = pitches.to(device, non_blocking=True)
+        audio_Singers = audio_Singers.to(device, non_blocking=True)
+        mel_Singers = mel_Singers.to(device, non_blocking=True)
+        noises = noises.to(device, non_blocking=True)
 
-        encodings = self.model_Dict['Encoder'](mels)
-        fake_Audios = self.model_Dict['Generator'](noises, encodings, singers, pitches)
-        loss_Dict['Spectral_Convergence'], loss_Dict['Magnitude'] = self.criterion_Dict['STFT'](fake_Audios, audios)
-        loss_Dict['Generator'] = loss_Dict['Spectral_Convergence'] + loss_Dict['Magnitude']
+        # Generator
+        fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
+            mels= mels,
+            pitches= pitches,
+            singers= audio_Singers,
+            noises= noises,
+            discrimination= self.steps >= hp_Dict['Train']['Discriminator_Delay'],
+            reals= audios
+            )
+
+        loss_Dict['Generator/Spectral_Convergence'], loss_Dict['Generator/Magnitude'] = self.criterion_Dict['STFT'](fakes, audios)
+        loss_Dict['Generator'] = loss_Dict['Generator/Spectral_Convergence'] + loss_Dict['Generator/Magnitude']
         
-        if self.steps >= hp_Dict['Train']['Confuser_Delay']:
-            singer_Logits = self.model_Dict['Singer_Classification_Network'](encodings)
-            pitch_Logits = self.model_Dict['Pitch_Regression_Network'](encodings)        
-            loss_Dict['Singer'] = self.criterion_Dict['CE'](singer_Logits, singers)        
-            loss_Dict['Pitch'] = self.criterion_Dict['MAE'](pitch_Logits, pitches)
-            loss_Dict['Confuser'] = \
-                hp_Dict['Train']['Adversarial_Weight']['Singer_Classification']['Generator'] * loss_Dict['Singer'] + \
-                hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression']['Generator'] * loss_Dict['Pitch']
-            loss_Dict['Generator'] -= loss_Dict['Confuser']
-
-            loss_Dict['Confuser'] = \
-                hp_Dict['Train']['Adversarial_Weight']['Singer_Classification']['Confuser'] * loss_Dict['Singer'] + \
-                hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression']['Confuser'] * loss_Dict['Pitch']            
-            loss_Dict['Singer_Acc'] = torch.mean(torch.eq(
-                torch.argmax(singer_Logits, dim= 1),
-                singers,
-                ).type(torch.FloatTensor))
+        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
+        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
+        loss_Dict['Confuser'] = loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            fake_Discriminations = self.model_Dict['Discriminator'](fake_Audios)
-            loss_Dict['Adversarial'] = self.criterion_Dict['MSE'](
-                fake_Discriminations,
-                fake_Discriminations.new_ones(fake_Discriminations.size())
-                )
-            loss_Dict['Generator'] += hp_Dict['Train']['Adversarial_Weight']['Discriminator'] * loss_Dict['Adversarial']
-        
-            real_Discriminations = self.model_Dict['Discriminator'](audios)
-            loss_Dict['Real'] = self.criterion_Dict['MSE'](
-                real_Discriminations,
-                real_Discriminations.new_ones(real_Discriminations.size())
-                )
-            loss_Dict['Fake'] = self.criterion_Dict['MSE'](
-                fake_Discriminations,
-                fake_Discriminations.new_zeros(fake_Discriminations.size())
-                )
-            loss_Dict['Discriminator'] = loss_Dict['Real'] + loss_Dict['Fake']
+            loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # As the discriminator, negative is correct.
+            loss_Dict['Discriminator/Real'] = -torch.mean(reals_Discriminations)  # As the discriminator, positive is correct.
+            loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
 
         for tag, loss in loss_Dict.items():
-            self.loss_Dict['Evaluation'][tag] += loss
+            self.scalar_Dict['Evaluation']['Loss/{}'.format(tag)] += loss
 
     @torch.no_grad()
     def Inference_Step(self, audios, mels, pitches, singers, noises, start_Index= 0):
-        audios = audios.to(device)
-        mels = mels.to(device)
-        pitches = pitches.to(device)
-        singers = singers.to(device)
-        noises = noises.to(device)
+        audios = audios.to(device, non_blocking=True)
+        mels = mels.to(device, non_blocking=True)
+        pitches = pitches.to(device, non_blocking=True)
+        singers = singers.to(device, non_blocking=True)
+        noises = noises.to(device, non_blocking=True)
 
-        encodings = self.model_Dict['Encoder'](mels)
-        fakes = self.model_Dict['Generator'](noises, encodings, singers, pitches).cpu().numpy()
+        fakes, *_ = self.model(
+            mels= mels,
+            pitches= pitches,
+            singers= singers,
+            noises= noises
+            )
 
         os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps)).replace("\\", "/"), exist_ok= True)
+        for index, (real, fake) in enumerate(zip(
+            audios.cpu().numpy(),
+            fakes.cpu().numpy()
+            )):
+            file = os.path.join(
+                hp_Dict['Inference_Path'],
+                'Step-{}'.format(self.steps),
+                'Step-{}.IDX_{}'.format(self.steps, index + start_Index)
+                ).replace("\\", "/")
 
-        for index, (real, fake) in enumerate(zip(audios.cpu().numpy(), fakes)):            
+
             new_Figure = plt.figure(figsize=(80, 10 * 2), dpi=100)
             plt.subplot(211)
             plt.plot(real)
@@ -357,48 +294,54 @@ class Trainer:
             plt.plot(fake)
             plt.title('Fake wav    Index: {}'.format(index))
             plt.tight_layout()
-            plt.savefig(
-                os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'Step-{}.IDX_{}.PNG'.format(self.steps, index + start_Index)).replace("\\", "/")
-                )
+            plt.savefig('{}.png'.format(file))
             plt.close(new_Figure)
 
             wavfile.write(
-                filename= os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'Step-{}.IDX_{}.WAV'.format(self.steps, index + start_Index)).replace("\\", "/"),
-                data= (fake * 32767.5).astype(np.int16),
+                filename= '{}.wav'.format(file),
+                data= (np.clip(fake, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
                 rate= hp_Dict['Sound']['Sample_Rate']
                 )
 
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
 
-        for model in self.model_Dict.values():
-            model.eval()
+        self.model.eval()
 
-        for step, (audios, mels, pitches, original_Singers, inference_Singers, noises) in tqdm(enumerate(self.dataLoader_Dict['Dev'], 1), desc='[Evaluation]'):
-            self.Evaluation_Step(audios, mels, pitches, original_Singers, noises)
+        for step, (audios, mels, pitches, original_Singers, inference_Singers, noises) in tqdm(
+            enumerate(self.dataLoader_Dict['Dev'], 1),
+            desc='[Evaluation]',
+            total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp_Dict['Train']['Batch_Size'])
+            ):
+            self.Evaluation_Step(audios, mels, pitches, original_Singers, original_Singers, noises)
             self.Inference_Step(audios, mels, pitches, inference_Singers, noises, start_Index= (step - 1) * hp_Dict['Train']['Batch_Size'])
 
-        self.loss_Dict['Evaluation'] = {
+        self.scalar_Dict['Evaluation'] = {
             tag: loss / step
-            for tag, loss in self.loss_Dict['Evaluation'].items()
+            for tag, loss in self.scalar_Dict['Evaluation'].items()
             }
-        self.Write_to_Tensorboard('Evaluation', self.loss_Dict['Evaluation'])
-        self.loss_Dict['Evaluation'] = defaultdict(float)
+        self.Write_to_Tensorboard('Evaluation', self.scalar_Dict['Evaluation'])
+        self.scalar_Dict['Evaluation'] = defaultdict(float)
+
         
-        for model in self.model_Dict.values():
-            model.train()
+        self.model.train()
 
 
     @torch.no_grad()
-    def Back_Translate_Step(self, audios, mels, pitches, singers, noises):
-        audios = audios.to(device)
-        mels = mels.to(device)
-        pitches = pitches.to(device)
-        singers = singers.to(device)
-        noises = noises.to(device)
+    def Back_Translate_Step(self, mels, pitches, singers, noises):
+        mels = mels.to(device, non_blocking=True)
+        pitches = pitches.to(device, non_blocking=True)
+        singers = singers.to(device, non_blocking=True)
+        noises = noises.to(device, non_blocking=True)
 
-        encodings = self.model_Dict['Encoder'](mels)
-        return self.model_Dict['Generator'](noises, encodings, singers, pitches).cpu().numpy()
+        fakes, *_ = self.model(
+            mels= mels,
+            pitches= pitches,
+            singers= singers,
+            noises= noises
+            )
+        
+        return fakes.cpu().numpy()
 
     def Data_Accumulation(self):
         def Mixup(audio, pitch):
@@ -418,21 +361,12 @@ class Trainer:
                 beta * pitch[offset1:offset1 + hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 2] + \
                 (1 - beta) * pitch[offset2:offset2 + hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 2]
             
-            new_Mel = np.transpose(melspectrogram(
-                y= new_Audio,
-                num_freq= hp_Dict['Sound']['Spectrogram_Dim'],
-                hop_length= hp_Dict['Sound']['Frame_Shift'],
-                win_length= hp_Dict['Sound']['Frame_Length'],        
-                num_mels= hp_Dict['Sound']['Mel_Dim'],
-                sample_rate= hp_Dict['Sound']['Sample_Rate'],
-                max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
-                ))
+            _, new_Mel, _, _ = Pattern_Generate(audio= new_Audio)
 
             return new_Audio, new_Mel, new_Pitch
 
-        def Back_Translate(audios, mels, pitches, singers, noises):
-            new_Audios = self.Back_Translate_Step(
-                audios= audios,
+        def Back_Translate(mels, pitches, singers, noises):
+            fakes = self.Back_Translate_Step(
                 mels= mels,
                 pitches= pitches,
                 singers= singers,
@@ -440,16 +374,8 @@ class Trainer:
                 )
 
             new_Mels = [
-                np.transpose(melspectrogram(
-                    y= new_Audio,
-                    num_freq= hp_Dict['Sound']['Spectrogram_Dim'],
-                    hop_length= hp_Dict['Sound']['Frame_Shift'],
-                    win_length= hp_Dict['Sound']['Frame_Length'],        
-                    num_mels= hp_Dict['Sound']['Mel_Dim'],
-                    sample_rate= hp_Dict['Sound']['Sample_Rate'],
-                    max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
-                    ))
-                for new_Audio in new_Audios
+                Pattern_Generate(audio= fake)[1]
+                for fake in fakes
                 ]
 
             return new_Mels
@@ -476,7 +402,7 @@ class Trainer:
                     choice([x for x in range(hp_Dict['Num_Singers']) if x != singer])
                     for singer in singers
                     ], axis= 0))
-                back_Translate_Mels = Back_Translate(audios, mels, pitches, mel_Singers, noises)
+                back_Translate_Mels = Back_Translate(mels, pitches, mel_Singers, noises)
                 for audio, back_Translate_Mel, pitch, audio_Singer, mel_Singer in zip(
                     audios.numpy(), back_Translate_Mels, pitches.numpy(), singers.numpy(), mel_Singers.numpy()):
                     back_Translate_List.append((
@@ -487,34 +413,39 @@ class Trainer:
                         mel_Singer
                         ))
 
-        self.train_Dataset.Accumulation_Renew(
+        self.dataLoader_Dict['Train'].dataset.Accumulation_Renew(
             mixup_Pattern_List= mixup_List,
             back_Translate_Pattern_List= back_Translate_List
             )
 
 
     def Load_Checkpoint(self):
-        state_Dict = torch.load(
-            os.path.join(hp_Dict['Checkpoint_Path'], 'S_{}.pkl'.format(self.steps).replace('\\', '/')),
-            map_location= 'cpu'
-            )
+        if self.steps == 0:
+            paths = [
+                os.path.join(root, file).replace('\\', '/')                
+                for root, _, files in os.walk(hp_Dict['Checkpoint_Path'])
+                for file in files
+                if os.path.splitext(file)[1] == '.pt'
+                ]
+            if len(paths) > 0:
+                path = max(paths, key = os.path.getctime)
+            else:
+                return  # Initial training
+        else:
+            path = os.path.join(hp_Dict['Checkpoint_Path'], 'S_{}.pt'.format(self.steps).replace('\\', '/'))
 
-        self.model_Dict['Generator'].load_state_dict(state_Dict['Model']['Generator'])
-        self.model_Dict['Discriminator'].load_state_dict(state_Dict['Model']['Discriminator'])
-        self.model_Dict['Encoder'].load_state_dict(state_Dict['Model']['Encoder'])
-        self.model_Dict['Singer_Classification_Network'].load_state_dict(state_Dict['Model']['Singer_Classification_Network'])
-        self.model_Dict['Pitch_Regression_Network'].load_state_dict(state_Dict['Model']['Pitch_Regression_Network'])
-        
-        self.optimizer_Dict['Generator'].load_state_dict(state_Dict['Optimizer']['Generator'])
-        self.optimizer_Dict['Discriminator'].load_state_dict(state_Dict['Optimizer']['Discriminator'])
-        self.optimizer_Dict['Confuser'].load_state_dict(state_Dict['Optimizer']['Confuser'])
-
-        self.scheduler_Dict['Generator'].load_state_dict(state_Dict['Scheduler']['Generator'])
-        self.scheduler_Dict['Discriminator'].load_state_dict(state_Dict['Scheduler']['Discriminator'])
-        self.scheduler_Dict['Confuser'].load_state_dict(state_Dict['Scheduler']['Confuser'])
-        
+        state_Dict = torch.load(path, map_location= 'cpu')
+        self.model.load_state_dict(state_Dict['Model'])
+        self.optimizer.load_state_dict(state_Dict['Optimizer'])
+        self.scheduler.load_state_dict(state_Dict['Scheduler'])
         self.steps = state_Dict['Steps']
         self.epochs = state_Dict['Epochs']
+
+        if hp_Dict['Use_Mixed_Precision']:
+            if not 'AMP' in state_Dict.keys():
+                logging.info('No AMP state dict is in the checkpoint. Model regards this checkpoint is trained without mixed precision.')
+            else:                
+                amp.load_state_dict(state_Dict['AMP'])
 
         logging.info('Checkpoint loaded at {} steps.'.format(self.steps))
 
@@ -522,40 +453,30 @@ class Trainer:
         os.makedirs(hp_Dict['Checkpoint_Path'], exist_ok= True)
 
         state_Dict = {
-            'Model': {
-                'Generator': self.model_Dict['Generator'].state_dict(),
-                'Discriminator': self.model_Dict['Discriminator'].state_dict(),
-                'Encoder': self.model_Dict['Encoder'].state_dict(),
-                'Singer_Classification_Network': self.model_Dict['Singer_Classification_Network'].state_dict(),
-                'Pitch_Regression_Network': self.model_Dict['Pitch_Regression_Network'].state_dict(),
-                },
-            'Optimizer': {
-                'Generator': self.optimizer_Dict['Generator'].state_dict(),
-                'Discriminator': self.optimizer_Dict['Discriminator'].state_dict(),
-                'Confuser': self.optimizer_Dict['Confuser'].state_dict(),
-                },
-            'Scheduler': {
-                'Generator': self.scheduler_Dict['Generator'].state_dict(),
-                'Discriminator': self.scheduler_Dict['Discriminator'].state_dict(),
-                'Confuser': self.scheduler_Dict['Confuser'].state_dict(),
-                },
+            'Model' : self.model.state_dict(),
+            'Optimizer': self.optimizer.state_dict(),
+            'Scheduler': self.scheduler.state_dict(),
             'Steps': self.steps,
             'Epochs': self.epochs,
             }
+        if hp_Dict['Use_Mixed_Precision']:
+            state_Dict['AMP'] = amp.state_dict()
 
         torch.save(
             state_Dict,
-            os.path.join(hp_Dict['Checkpoint_Path'], 'S_{}.pkl'.format(self.steps).replace('\\', '/'))
+            os.path.join(hp_Dict['Checkpoint_Path'], 'S_{}.pt'.format(self.steps).replace('\\', '/'))
             )
 
         logging.info('Checkpoint saved at {} steps.'.format(self.steps))
-       
 
     def Train(self):
         if not os.path.exists(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameter.yaml')):
             os.makedirs(hp_Dict['Checkpoint_Path'], exist_ok= True)
             with open(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameters.yaml').replace("\\", "/"), "w") as f:
                 yaml.dump(hp_Dict, f)
+
+        if hp_Dict['Train']['Initial_Inference']:
+            self.Evaluation_Epoch()
 
         self.tqdm = tqdm(
             initial= self.steps,
@@ -573,9 +494,9 @@ class Trainer:
         self.tqdm.close()
         logging.info('Finished training.')
 
-    def Write_to_Tensorboard(self, category, loss_Dict):
-        for tag, loss in loss_Dict.items():
-            self.writer.add_scalar('{}/{}'.format(category, tag), loss, self.steps)
+    def Write_to_Tensorboard(self, category, scalar_Dict):
+        for tag, scalar in scalar_Dict.items():
+            self.writer_Dict[category].add_scalar(tag, scalar, self.steps)
 
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()

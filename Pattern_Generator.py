@@ -3,7 +3,9 @@ import yaml, pickle, os, librosa, argparse
 from concurrent.futures import ThreadPoolExecutor as PE
 from collections import deque
 from threading import Thread
-from Audio import melspectrogram
+from tqdm import tqdm
+
+from Audio import Audio_Prep, Mel_Generate
 from yin import pitch_calc
 
 with open('Hyper_Parameter.yaml') as f:
@@ -11,45 +13,49 @@ with open('Hyper_Parameter.yaml') as f:
 
 using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
 
-def Pattern_Generate(path, keyword_Index_Dict, top_db= 60, reverse= False, invert= False):
-    sig = librosa.core.load(
-        path,
-        sr= hp_Dict['Sound']['Sample_Rate']
-        )[0]
-
-    sig = librosa.effects.trim(sig, top_db= top_db, frame_length= 32, hop_length= 16)[0] * 0.99
-    sig = librosa.util.normalize(sig)
-    
-    mel = np.transpose(melspectrogram(
-        y= sig,
-        num_freq= hp_Dict['Sound']['Spectrogram_Dim'],        
-        hop_length= hp_Dict['Sound']['Frame_Shift'],
-        win_length= hp_Dict['Sound']['Frame_Length'],
-        num_mels= hp_Dict['Sound']['Mel_Dim'],
-        sample_rate= hp_Dict['Sound']['Sample_Rate'],
-        max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
-        ))
-
+def Pitch_Generate(audio):
     pitch = pitch_calc(
-        sig= sig,
+        sig= audio,
         sr= hp_Dict['Sound']['Sample_Rate'],
         w_len= hp_Dict['Sound']['Frame_Length'],
         w_step= hp_Dict['Sound']['Frame_Shift'],
         confidence_threshold= hp_Dict['Sound']['Confidence_Threshold'],
         gaussian_smoothing_sigma = hp_Dict['Sound']['Gaussian_Smoothing_Sigma']
         )
+    return (pitch - np.min(pitch)) / (np.max(pitch) - np.min(pitch) + 1e-7)
+
+def Pattern_Generate(audio= None, path= None, keyword_Index_Dict= None, top_db= 60, reverse= False, invert= False):
+    audio = audio if not audio is None else Audio_Prep(path, hp_Dict['Sound']['Sample_Rate'], top_db)
+    if reverse:
+        audio = audio[::-1]
+    if invert:
+        audio = -audio
+
+    mel = Mel_Generate(
+        audio= audio,
+        sample_rate= hp_Dict['Sound']['Sample_Rate'],
+        num_frequency= hp_Dict['Sound']['Spectrogram_Dim'],
+        num_mel= hp_Dict['Sound']['Mel_Dim'],
+        window_length= hp_Dict['Sound']['Frame_Length'],
+        hop_length= hp_Dict['Sound']['Frame_Shift'],
+        mel_fmin= hp_Dict['Sound']['Mel_F_Min'],
+        mel_fmax= hp_Dict['Sound']['Mel_F_Max'],
+        max_abs_value= hp_Dict['Sound']['Max_Abs_Mel']
+        )
+    pitch = Pitch_Generate(audio)
 
     singer_ID = None
-    for keyword, index in keyword_Index_Dict.items():
-        if keyword in path:
-            singer_ID = index
-            break
-    if singer_ID is None:
-        raise ValueError('No keyword in keyword_Index_Dict.')
+    if not keyword_Index_Dict is None:
+        for keyword, index in keyword_Index_Dict.items():
+            if keyword in path:
+                singer_ID = index
+                break
+        if singer_ID is None:
+            raise ValueError('No keyword in keyword_Index_Dict.')
 
-    return sig, mel, pitch, singer_ID
+    return audio, mel, pitch, singer_ID
 
-def Pattern_File_Generate(path, keyword_Index_Dict, dataset, file_Prefix='', display_Prefix = '', top_db= 60):
+def Pattern_File_Generate(path, keyword_Index_Dict, dataset, file_Prefix='', top_db= 60):
     for reverse in [False, True]:
         for invert in [False, True]:
             sig, mel, pitch, singer_ID = Pattern_Generate(
@@ -78,8 +84,6 @@ def Pattern_File_Generate(path, keyword_Index_Dict, dataset, file_Prefix='', dis
 
             with open(os.path.join(hp_Dict['Train']['Pattern_Path'], pickle_File_Name).replace("\\", "/"), 'wb') as f:
                 pickle.dump(new_Pattern_Dict, f, protocol=4)
-            
-            print('[{}]'.format(display_Prefix), '{}'.format(path), '->', '{}'.format(pickle_File_Name))
 
 
 def NUS48E_Info_Load(nus48e_Path, sex_Type):
@@ -135,6 +139,11 @@ def Metadata_Generate(keyword_Index_Dict):
         'Dataset_Dict': {},
         }
 
+    files_TQDM = tqdm(
+        total= sum([len(files) for root, _, files in os.walk(hp_Dict['Train']['Pattern_Path'])]),
+        desc= 'Metadata'
+        )
+
     for root, _, files in os.walk(hp_Dict['Train']['Pattern_Path']):
         for file in files:
             with open(os.path.join(root, file).replace("\\", "/"), "rb") as f:
@@ -147,6 +156,7 @@ def Metadata_Generate(keyword_Index_Dict):
                     new_Metadata_Dict['File_List'].append(file)
                 except:
                     print('File \'{}\' is not correct pattern file. This file is ignored.'.format(file))
+                files_TQDM.update(1)
 
     with open(os.path.join(hp_Dict['Train']['Pattern_Path'], hp_Dict['Train']['Metadata_File'].upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Metadata_Dict, f, protocol=2)
@@ -157,21 +167,19 @@ def Metadata_Generate(keyword_Index_Dict):
 if __name__ == "__main__":
     argParser = argparse.ArgumentParser()
     argParser.add_argument('-nus48e', '--nus48e_path', required=False)
-    argParser.add_argument('-sex', '--sex_type', required= False, default= 'M')
-    # argParser.add_argument("-mw", "--max_worker", required=False)
-    # argParser.set_defaults(max_worker = 10)
-    argument_Dict = vars(argParser.parse_args())
+    argParser.add_argument('-sex', '--sex_type', required= False, default= 'B')
+    args = argParser.parse_args()
 
-    if not argument_Dict['sex_type'] in ['M', 'F', 'B']:
+    if not args.sex_type in ['M', 'F', 'B']:
         raise ValueError('Unsupported sex type. Only M, F, or B is supported')
 
     total_Pattern_Count = 0
     keyword_Index_Dict = {}
 
-    if not argument_Dict['nus48e_path'] is None:
+    if not args.nus48e_path is None:
         nus48e_File_Path_List, nus48e_Singer_Dict, nus48e_Keyword_List = NUS48E_Info_Load(
-            nus48e_Path= argument_Dict['nus48e_path'],
-            sex_Type= argument_Dict['sex_type']
+            nus48e_Path= args.nus48e_path,
+            sex_Type= args.sex_type
             )
         total_Pattern_Count += len(nus48e_File_Path_List)
         
@@ -184,24 +192,19 @@ if __name__ == "__main__":
         raise ValueError('Total pattern count is zero.')
     
     os.makedirs(hp_Dict['Train']['Pattern_Path'], exist_ok= True)
-    total_Generated_Pattern_Count = 0
-    # with PE(max_workers = int(argument_Dict['max_worker'])) as pe:
-    if not argument_Dict['nus48e_path'] is None:
-        for index, file_Path in enumerate(nus48e_File_Path_List):
+    
+    if not args.nus48e_path is None:
+        for index, file_Path in tqdm(
+            enumerate(nus48e_File_Path_List),
+            desc= 'Pattern',
+            total= len(nus48e_File_Path_List)
+            ):
             Pattern_File_Generate(
                 file_Path,
-                keyword_Index_Dict,                    
+                keyword_Index_Dict,
                 'NUS48E',
                 nus48e_Singer_Dict[file_Path],
-                'NUS48E {:05d}/{:05d}    Total {:05d}/{:05d}'.format(
-                    index,
-                    len(nus48e_File_Path_List),
-                    total_Generated_Pattern_Count,
-                    total_Pattern_Count
-                    ),
                 20
                 )
-            total_Generated_Pattern_Count += 1
-
 
     Metadata_Generate(keyword_Index_Dict)

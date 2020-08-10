@@ -3,9 +3,6 @@ import numpy as np
 import yaml, librosa, pickle, os
 from random import choice
 
-from Audio import melspectrogram
-from yin import pitch_calc
-
 with open('Hyper_Parameter.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
