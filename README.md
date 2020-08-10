@@ -15,7 +15,7 @@ Nachmani, E., & Wolf, L. (2019). Unsupervised singing voice conversion. arXiv pr
 Please see the 'requirements.txt'.
 
 # Structrue
-![Structure](./Figures/Structure.png)
+![Structure](./Figures/PVCGAN.svg)
 
 # Used dataset
 Currently uploaded code is compatible with NUS-48E datasets: [NUS-48E](https://smcnus.comp.nus.edu.sg/nus-48e-sung-and-spoken-lyrics-corpus/)

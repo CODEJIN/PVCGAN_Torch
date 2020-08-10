@@ -207,12 +207,13 @@ class Trainer:
                 self.Save_Checkpoint()
 
             if self.steps % hp_Dict['Train']['Logging_Interval'] == 0:
-                self.loss_Dict['Train'] = {
+                self.scalar_Dict['Train'] = {
                     tag: loss / hp_Dict['Train']['Logging_Interval']
-                    for tag, loss in self.loss_Dict['Train'].items()
-                    }
-                self.Write_to_Tensorboard('Train', self.loss_Dict['Train'])
-                self.loss_Dict['Train'] = defaultdict(float)
+                    for tag, loss in self.scalar_Dict['Train'].items()
+                        }
+                self.scalar_Dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
+                self.Write_to_Tensorboard('Train', self.scalar_Dict['Train'])
+                self.scalar_Dict['Train'] = defaultdict(float)
 
             if self.steps % hp_Dict['Train']['Evaluation_Interval'] == 0:
                 self.Evaluation_Epoch()
