@@ -160,7 +160,9 @@ class Trainer:
         
         loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
         loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
-        loss_Dict['Confuser'] = loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
+        loss_Dict['Confuser'] = \
+            hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Confuser/Singer'] + \
+            hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
             loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # As the discriminator, negative is correct.
@@ -168,7 +170,7 @@ class Trainer:
             loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
                 
         self.optimizer.zero_grad()
-        loss = loss_Dict['Generator'] + loss_Dict['Confuser'] + loss_Dict['Discriminator']
+        loss = loss_Dict['Generator'] + loss_Dict['Confuser'] + hp_Dict['Train']['Adversarial_Weight']['Discriminator'] * loss_Dict['Discriminator']
 
         if hp_Dict['Use_Mixed_Precision']:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
@@ -250,7 +252,9 @@ class Trainer:
         
         loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
         loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
-        loss_Dict['Confuser'] = loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
+        loss_Dict['Confuser'] = \
+            hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Confuser/Singer'] + \
+            hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
             loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # As the discriminator, negative is correct.
@@ -261,7 +265,7 @@ class Trainer:
             self.scalar_Dict['Evaluation']['Loss/{}'.format(tag)] += loss
 
     @torch.no_grad()
-    def Inference_Step(self, audios, mels, pitches, singers, noises, start_Index= 0):
+    def Inference_Step(self, audios, mels, pitches, singers, noises, source_Labels, conversion_Labels, start_Index= 0, tag_step= False, tag_Index= False):
         audios = audios.to(device, non_blocking=True)
         mels = mels.to(device, non_blocking=True)
         pitches = pitches.to(device, non_blocking=True)
@@ -275,31 +279,36 @@ class Trainer:
             noises= noises
             )
 
-        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps)).replace("\\", "/"), exist_ok= True)
-        for index, (real, fake) in enumerate(zip(
+        files = []
+        for index, (source_Label, conversion_Label) in enumerate(zip(source_Labels, conversion_Labels)):
+            tags = []
+            if tag_step: tags.append('Step-{}'.format(self.steps))
+            tags.append('{}_to_{}'.format(source_Label, conversion_Label))
+            if tag_Index: tags.append('IDX_{}'.format(index + start_Index))
+            files.append('.'.join(tags))
+
+        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)
+        os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV').replace("\\", "/"), exist_ok= True)
+        for index, (real, fake, source_Label, conversion_Label, file) in enumerate(zip(
             audios.cpu().numpy(),
-            fakes.cpu().numpy()
+            fakes.cpu().numpy(),
+            source_Labels,
+            conversion_Labels,
+            files
             )):
-            file = os.path.join(
-                hp_Dict['Inference_Path'],
-                'Step-{}'.format(self.steps),
-                'Step-{}.IDX_{}'.format(self.steps, index + start_Index)
-                ).replace("\\", "/")
-
-
             new_Figure = plt.figure(figsize=(80, 10 * 2), dpi=100)
             plt.subplot(211)
             plt.plot(real)
-            plt.title('Original wav    Index: {}'.format(index))
+            plt.title('Original wav    Index: {}    {} -> {}'.format(index + start_Index, source_Label, conversion_Label))
             plt.subplot(212)            
             plt.plot(fake)
-            plt.title('Fake wav    Index: {}'.format(index))
-            plt.tight_layout()
-            plt.savefig('{}.png'.format(file))
+            plt.title('Fake wav    Index: {}    {} -> {}'.format(index + start_Index, source_Label, conversion_Label))
+            plt.tight_layout()            
+            plt.savefig(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG', '{}.png'.format(file)).replace('\\', '/'))
             plt.close(new_Figure)
 
             wavfile.write(
-                filename= '{}.wav'.format(file),
+                filename= os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV', '{}.wav'.format(file)).replace('\\', '/'),
                 data= (np.clip(fake, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
                 rate= hp_Dict['Sound']['Sample_Rate']
                 )
@@ -309,13 +318,13 @@ class Trainer:
 
         self.model.eval()
 
-        for step, (audios, mels, pitches, original_Singers, inference_Singers, noises) in tqdm(
+        for step, (audios, mels, pitches, original_Singers, conversion_Singers, noises, source_Labels, conversion_Labels) in tqdm(
             enumerate(self.dataLoader_Dict['Dev'], 1),
             desc='[Evaluation]',
             total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp_Dict['Train']['Batch_Size'])
             ):
             self.Evaluation_Step(audios, mels, pitches, original_Singers, original_Singers, noises)
-            self.Inference_Step(audios, mels, pitches, inference_Singers, noises, start_Index= (step - 1) * hp_Dict['Train']['Batch_Size'])
+            self.Inference_Step(audios, mels, pitches, conversion_Singers, noises, source_Labels, conversion_Labels, start_Index= (step - 1) * hp_Dict['Train']['Batch_Size'])
 
         self.scalar_Dict['Evaluation'] = {
             tag: loss / step
