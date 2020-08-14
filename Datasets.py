@@ -101,8 +101,6 @@ class Train_Dataset(Dataset):
             )
 
         if hp_Dict['Train']['Shared_Train_and_Eval']:            
-            hp_Dict['Train']['Wav_Length']
-            hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift']
             self.pattern_List = [
                 (
                     audio[hp_Dict['Train']['Wav_Length']:],
@@ -158,8 +156,20 @@ class Accumulation_Dataset(Dataset):
                 hp_Dict['Train']['Train_Pattern']['Path'],
                 hp_Dict['Train']['Train_Pattern']['Metadata_File']
                 ).replace('\\', '/')
-            )        
-        self.pattern_List = [x[:-1] for x in self.pattern_List]
+            )
+
+        if hp_Dict['Train']['Shared_Train_and_Eval']:
+            self.pattern_List = [
+                (
+                    audio[hp_Dict['Train']['Wav_Length']:],
+                    mel[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift']:],
+                    pitch[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift']:],
+                    singer
+                    )
+                for audio, mel, pitch, singer, _ in self.pattern_List
+                ]
+        else:
+            self.pattern_List = [x[:-1] for x in self.pattern_List]
 
 class Inference_Dataset(torch.utils.data.Dataset):
     def __init__(

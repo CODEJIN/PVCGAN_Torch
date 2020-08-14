@@ -174,8 +174,9 @@ class Trainer:
             hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # Discriminator thinks that negative is correct.
-            loss_Dict['Discriminator/Real'] = -torch.mean(reals_Discriminations)  # Discriminator thinks that positive is correct.
+            loss_Dict['Discriminator/Fake'] = self.criterion_Dict['MSE'](fakes_Discriminations, torch.zeros_like(fakes_Discriminations))   # Discriminator thinks that 0 is correct.
+            loss_Dict['Discriminator/Real'] = self.criterion_Dict['MSE'](reals_Discriminations, torch.ones_like(reals_Discriminations))  # Discriminator thinks that 1 is correct.
+
             loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
                 
         self.optimizer.zero_grad()
@@ -270,8 +271,8 @@ class Trainer:
             hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # Discriminator thinks that negative is correct.
-            loss_Dict['Discriminator/Real'] = -torch.mean(reals_Discriminations)  # Discriminator thinks that positive is correct.
+            loss_Dict['Discriminator/Fake'] = self.criterion_Dict['MSE'](fakes_Discriminations, torch.zeros_like(fakes_Discriminations))   # Discriminator thinks that 0 is correct.
+            loss_Dict['Discriminator/Real'] = self.criterion_Dict['MSE'](reals_Discriminations, torch.ones_like(reals_Discriminations))  # Discriminator thinks that 1 is correct.
             loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
 
         for tag, loss in loss_Dict.items():
@@ -296,7 +297,7 @@ class Trainer:
             for tag, loss in self.scalar_Dict['Evaluation'].items()
             }
         self.writer_Dict['Evaluation'].add_scalar_dict(self.scalar_Dict['Evaluation'], self.steps)
-        self.writer_Dict['Evaluation'].add_histogram_model(self.model, self.steps, delete_keywords=['layer_DIct', '1', 'layer'])
+        self.writer_Dict['Evaluation'].add_histogram_model(self.model, self.steps, delete_keywords=['layer_Dict', '1', 'layer'])
         self.scalar_Dict['Evaluation'] = defaultdict(float)
 
         self.writer_Dict['Evaluation'].add_image_dict({
