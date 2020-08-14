@@ -89,18 +89,19 @@ Train:
         Epsilon: 1.0e-7
     Adversarial_Weight:
         Discriminator: 4.0
-        Singer_Classification: 0.01
-        Pitch_Regression: 0.1
+        Singer_Classification: 0.1
+        Pitch_Regression: 1.0
     Gradient_Norm: 5.0
     Max_Step: 400000
-    Checkpoint_Save_Interval: 2000
+    Checkpoint_Save_Interval: 1000
     Logging_Interval: 100
     Evaluation_Interval: 1000
-    Initial_Inference: true
+    Inference_Interval: 2000
+    Initial_Inference: false
 
 Inference_Batch_Size: 4
 Use_Mixed_Precision: true
-Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Inference'
-Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Checkpoint'
-Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Log'
+Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10/Inference'
+Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10/Checkpoint'
+Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10/Log'
 Device: '0'

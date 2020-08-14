@@ -244,7 +244,7 @@ class Inference_Collater:
         audios, mels, pitches = Stack(audios, mels, pitches, audio_length= max([audio.shape[0] for audio in audios]))
         singers = np.stack(singers, axis= 0)
 
-        audios = torch.FloatTensor(auidos)   # [Batch, Time]
+        audios = torch.FloatTensor(audios)   # [Batch, Time]
         mels = torch.FloatTensor(mels).transpose(2, 1)   # [Batch, Time, Mel_dim] -> [Batch, Mel_dim, Time]
         pitches = torch.FloatTensor(pitches)   # [Batch, Time]
         singers = torch.LongTensor(singers)   # [Batch]

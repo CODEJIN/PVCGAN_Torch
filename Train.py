@@ -206,8 +206,8 @@ class Trainer:
 
     def Train_Epoch(self):
         if any([
-            hp_Dict['Train']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Mixup']['Apply_Delay'],
-            hp_Dict['Train']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Back_Translate']['Apply_Delay']
+            hp_Dict['Train']['Train_Pattern']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Mixup']['Apply_Delay'],
+            hp_Dict['Train']['Train_Pattern']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Back_Translate']['Apply_Delay']
             ]):
             self.Data_Accumulation()
 
@@ -229,10 +229,14 @@ class Trainer:
             if self.steps % hp_Dict['Train']['Evaluation_Interval'] == 0:
                 self.Evaluation_Epoch()
             
+            if self.steps % hp_Dict['Train']['Inference_Interval'] == 0:
+                self.Inference_Epoch()
+            
+            
             if self.steps >= hp_Dict['Train']['Max_Step']:
                 return
 
-        self.epochs += hp_Dict['Train']['Accumulation_Inverval']
+        self.epochs += hp_Dict['Train']['Train_Pattern']['Accumulated_Dataset_Epoch']
 
     
     @torch.no_grad()
@@ -292,7 +296,7 @@ class Trainer:
             for tag, loss in self.scalar_Dict['Evaluation'].items()
             }
         self.writer_Dict['Evaluation'].add_scalar_dict(self.scalar_Dict['Evaluation'], self.steps)
-        self.writer_Dict['Evaluation'].add_histogram_model(self.model, self.steps)
+        self.writer_Dict['Evaluation'].add_histogram_model(self.model, self.steps, delete_keywords=['layer_DIct', '1', 'layer'])
         self.scalar_Dict['Evaluation'] = defaultdict(float)
 
         self.writer_Dict['Evaluation'].add_image_dict({
@@ -358,7 +362,7 @@ class Trainer:
                 )
 
     def Inference_Epoch(self):
-        logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
+        logging.info('(Steps: {}) Start inference.'.format(self.steps))
 
         self.model.eval()
 
@@ -394,8 +398,8 @@ class Trainer:
             offset1 = np.random.randint(0, max_Offset)
             offset2 = np.random.randint(0, max_Offset)
             beta = np.random.uniform(
-                low= hp_Dict['Train']['Mixup']['Min_Beta'],
-                high= hp_Dict['Train']['Mixup']['Max_Beta'],
+                low= hp_Dict['Train']['Train_Pattern']['Mixup']['Min_Beta'],
+                high= hp_Dict['Train']['Train_Pattern']['Mixup']['Max_Beta'],
                 )
 
             new_Audio = \
@@ -434,7 +438,7 @@ class Trainer:
             total= math.ceil(len(self.dataLoader_Dict['Accumulation'].dataset) / hp_Dict['Train']['Batch_Size'])
             ):
             #Mixup
-            if hp_Dict['Train']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Mixup']['Apply_Delay']:
+            if hp_Dict['Train']['Train_Pattern']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Mixup']['Apply_Delay']:
                 for audio, pitch, singer in zip(total_Audios, total_Pitches, singers.numpy()):
                     mixup_Audio, mixup_Mel, mixup_Pitch = Mixup(audio, pitch)
                     mixup_List.append((
@@ -446,7 +450,7 @@ class Trainer:
                         ))
             
             #Backtranslate
-            if hp_Dict['Train']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Back_Translate']['Apply_Delay']:
+            if hp_Dict['Train']['Train_Pattern']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Back_Translate']['Apply_Delay']:
                 mel_Singers = torch.LongTensor(np.stack([
                     choice([x for x in range(hp_Dict['Num_Singers']) if x != singer])
                     for singer in singers
@@ -526,6 +530,7 @@ class Trainer:
 
         if hp_Dict['Train']['Initial_Inference']:
             self.Evaluation_Epoch()
+            self.Inference_Epoch()
 
         self.tqdm = tqdm(
             initial= self.steps,

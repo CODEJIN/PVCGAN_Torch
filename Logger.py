@@ -1,17 +1,16 @@
 import torch
+import numpy as np
 from tensorboardX import SummaryWriter
 import matplotlib.pyplot as plt
 
 class Logger(SummaryWriter):
-    def add_scalar_dict(self, scalar_dict, global_step= None, walltime= None, display_name= '', summary_description= ''):
+    def add_scalar_dict(self, scalar_dict, global_step= None, walltime= None):
         for tag, scalar in scalar_dict.items():
             self.add_scalar(
                 tag= tag,
                 scalar_value= scalar,
                 global_step= global_step,
-                walltime= walltime,
-                display_name= display_name,
-                summary_description= summary_description
+                walltime= walltime
                 )
 
     def add_image_dict(self, image_dict, global_step, walltime= None):
