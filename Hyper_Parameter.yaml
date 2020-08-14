@@ -92,4 +92,4 @@ Use_Mixed_Precision: true
 Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Inference'
 Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Checkpoint'
 Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Log'
-Device: '0'
+Device: '1'
