@@ -53,18 +53,28 @@ STFT_Loss_Resolution:
     Shfit_Lengths: [120, 240, 50]
     Win_Lengths: [600, 1200, 240]
 
+
+# About `Train/Shared_Train_and_Eval`
+# When this value is true, the first 'Train/Wav_Length' length of each train pattern is excluded.
+# At the same time, the first 'Train/Wav_Length' length of each eval pattern is only used.
+# This function is used because the pattern amount of music vocal dataset like NUS-48 is usually not not so much.
 Train:
-    Accumulation_Inverval: 10
-    Mixup:
-        Use: true
-        Min_Beta: 0.3
-        Max_Beta: 0.7
-        Apply_Delay: 0
-    Back_Translate:
-        Use: true
-        Apply_Delay: 50000
-    Pattern_Path: 'C:/Pattern/PN.Pattern.NUS48E'
-    Metadata_File: 'METADATA.PICKLE'
+    Shared_Train_and_Eval: true  
+    Train_Pattern:
+        Path: 'C:/Pattern/PN.Pattern.NUS48E'
+        Metadata_File: 'METADATA.PICKLE'
+        Mixup:
+            Use: true
+            Min_Beta: 0.3
+            Max_Beta: 0.7
+            Apply_Delay: 0
+        Back_Translate:
+            Use: true
+            Apply_Delay: 50000
+        Accumulated_Dataset_Epoch: 10    # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
+    Eval_Pattern:
+        Path: 'C:/Pattern/PN.Pattern.NUS48E'
+        Metadata_File: 'METADATA.PICKLE'
     Num_Workers: 2
     Batch_Size: 4
     Wav_Length: 25600
@@ -88,6 +98,7 @@ Train:
     Evaluation_Interval: 1000
     Initial_Inference: true
 
+Inference_Batch_Size: 4
 Use_Mixed_Precision: true
 Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Inference'
 Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW/Checkpoint'

@@ -440,16 +440,16 @@ class ResConvGLU(torch.nn.Module):
         residuals = audios
 
         audios = self.layer_Dict['Conv1d'](audios)
-        audios_Tanh, audios_Sigmoid = audios.split(audios.size(1) // 2, dim= 1)
+        audios_Tanh, audios_Sigmoid = audios.chunk(2, dim= 1)
 
         auxs = self.layer_Dict['Aux'](auxs)
-        auxs_Tanh, auxs_Sigmoid = auxs.split(auxs.size(1) // 2, dim= 1)
+        auxs_Tanh, auxs_Sigmoid = auxs.chunk(2, dim= 1)
 
         singers = self.layer_Dict['Singer'](singers)
-        singers_Tanh, singers_Sigmoid = singers.split(singers.size(1) // 2, dim= 1)
+        singers_Tanh, singers_Sigmoid = singers.chunk(2, dim= 1)
 
         pitches = self.layer_Dict['Pitch'](pitches)
-        pitches_Tanh, pitches_Sigmoid = pitches.split(pitches.size(1) // 2, dim= 1)
+        pitches_Tanh, pitches_Sigmoid = pitches.chunk(2, dim= 1)
 
         audios_Tanh = torch.tanh(audios_Tanh + auxs_Tanh + singers_Tanh + pitches_Tanh)
         audios_Sigmoid = torch.sigmoid(audios_Sigmoid + auxs_Sigmoid + singers_Sigmoid + pitches_Sigmoid)

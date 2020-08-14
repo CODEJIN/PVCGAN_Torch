@@ -125,35 +125,47 @@
 # open('Inference_for_Training.txt', 'w').write('\n'.join(exports))
 
 
-import librosa
-from scipy.io import wavfile
-import os
-import numpy as np
+# import librosa
+# from scipy.io import wavfile
+# import os
+# import numpy as np
 
 
-paths = [
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/ADIZ_01.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/JLEE_05.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/JTAN_07.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/KENN_04.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/MCUR_10.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/MPOL_11.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/MPUR_02.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/NJAT_15.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/PMAR_08.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/SAMF_09.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/VKOW_19.wav',
-    'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/ZHIY_03.wav',
-    ]
+# paths = [
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/ADIZ_01.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/JLEE_05.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/JTAN_07.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/KENN_04.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/MCUR_10.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/MPOL_11.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/MPUR_02.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/NJAT_15.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/PMAR_08.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/SAMF_09.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/VKOW_19.wav',
+#     'D:/Python_Programming/CODEJIN.github.io/PVCGAN/ref/original/ZHIY_03.wav',
+#     ]
 
-for path in paths:
-    audio = librosa.core.load(path, sr= 24000)[0]
-    audio = librosa.effects.trim(audio, top_db=20, frame_length= 512, hop_length= 256)[0]
-    audio = librosa.util.normalize(audio)
-    audio = audio[3000*256:4280*256]
-    wavfile.write(
-        filename= os.path.basename(path),
-        data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
-        rate= 24000
-        )
+# for path in paths:
+#     audio = librosa.core.load(path, sr= 24000)[0]
+#     audio = librosa.effects.trim(audio, top_db=20, frame_length= 512, hop_length= 256)[0]
+#     audio = librosa.util.normalize(audio)
+#     audio = audio[3000*256:4280*256]
+#     wavfile.write(
+#         filename= os.path.basename(path),
+#         data= (np.clip(audio, -1.0 + 1e-7, 1.0 - 1e-7) * 32767.5).astype(np.int16),
+#         rate= 24000
+#         )
     
+# from Modules import PVCGAN
+from Logger import Logger
+
+import os, torch, yaml
+
+os.environ['CUDA_VISIBLE_DEVICES']= '-1'
+
+logger = Logger('/home/heejo/Documents/Personal/T')
+
+with open('Hyper_Parameter.yaml') as f:
+    hp_Dict = yaml.load(f, Loader=yaml.Loader)
+logger.add_hparams({'a': 10, 'b': 0.2315412}, {}, global_step= 0)
