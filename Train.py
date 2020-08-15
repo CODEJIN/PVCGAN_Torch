@@ -549,10 +549,6 @@ class Trainer:
         self.tqdm.close()
         logging.info('Finished training.')
 
-    def Write_to_Tensorboard(self, category, scalar_Dict):
-        for tag, scalar in scalar_Dict.items():
-            self.writer_Dict[category].add_scalar(tag, scalar, self.steps)
-
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
     argParser.add_argument('-s', '--steps', default= 0, type= int)
