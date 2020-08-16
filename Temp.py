@@ -88,18 +88,18 @@
 #     ]
 
 # paths = [
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS48E.ADIZ01.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS49E.JLEE05.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS50E.JTAN07.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS51E.KENN04.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS52E.MCUR10.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS53E.MPOL11.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS54E.MPUR02.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS55E.NJAT15.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS56E.PMAR08.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS57E.SAMF09.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS58E.VKOW19.PICKLE',
-#     'C:/Pattern/PN.Pattern.NUS48E/NUS59E.ZHIY03.PICKLE'
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.ADIZ01.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS49E.JLEE05.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS50E.JTAN07.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS51E.KENN04.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS52E.MCUR10.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS53E.MPOL11.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS54E.MPUR02.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS55E.NJAT15.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS56E.PMAR08.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS57E.SAMF09.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS58E.VKOW19.PICKLE',
+#     'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS59E.ZHIY03.PICKLE'
 #     ]
 
 # songs = [
@@ -117,12 +117,12 @@
 #     '03',
 #     ]
 
-# exports = ['Source_Label\tSource_Path\tConversion_Label\tConversion_Singer\tStart_Index\tEnd_Index']
+# exports = ['Source_Label/tSource_Path/tConversion_Label/tConversion_Singer/tStart_Index/tEnd_Index']
 # for source_Singer, source_Song, path in zip(singers, songs, paths):
 #     for index, conversion_Singer in enumerate(singers):
-#         exports.append('{}_{}\t{}\t{}\t{}\t3000\t4280'.format(source_Singer, source_Song, path, conversion_Singer, index))
+#         exports.append('{}_{}/t{}/t{}/t{}/t3000/t4280'.format(source_Singer, source_Song, path, conversion_Singer, index))
 
-# open('Inference_for_Training.txt', 'w').write('\n'.join(exports))
+# open('Inference_for_Training.txt', 'w').write('/n'.join(exports))
 
 
 # import librosa
@@ -157,15 +157,45 @@
 #         rate= 24000
 #         )
     
-# from Modules import PVCGAN
-from Logger import Logger
+# # from Modules import PVCGAN
+# from Logger import Logger
 
-import os, torch, yaml
+# import os, torch, yaml
 
-os.environ['CUDA_VISIBLE_DEVICES']= '-1'
+# os.environ['CUDA_VISIBLE_DEVICES']= '-1'
 
-logger = Logger('/home/heejo/Documents/Personal/T')
+# logger = Logger('/home/heejo/Documents/Personal/T')
 
-with open('Hyper_Parameter.yaml') as f:
-    hp_Dict = yaml.load(f, Loader=yaml.Loader)
-logger.add_hparams({'a': 10, 'b': 0.2315412}, {}, global_step= 0)
+# with open('Hyper_Parameter.yaml') as f:
+#     hp_Dict = yaml.load(f, Loader=yaml.Loader)
+# logger.add_hparams({'a': 10, 'b': 0.2315412}, {}, global_step= 0)
+
+
+import pickle
+import matplotlib.pyplot as plt
+
+# jlee = pickle.load(open("C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.JLEE11.PICKLE", 'rb'))
+# mpol = pickle.load(open("C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.MPOL11.PICKLE", 'rb'))
+# pmar = pickle.load(open("C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.PMAR11.PICKLE", 'rb'))
+# vkow = pickle.load(open("C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.VKOW11.PICKLE", 'rb'))
+
+# plt.subplot(411)
+# plt.plot(jlee['Pitch'])
+# plt.subplot(412)
+# plt.plot(mpol['Pitch'])
+# plt.subplot(413)
+# plt.plot(pmar['Pitch'])
+# plt.subplot(414)
+# plt.plot(vkow['Pitch'])
+# plt.tight_layout()
+# plt.show()
+
+
+import os
+
+for root, _, files in os.walk('C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing'):
+    for file in files:
+        file = os.path.join(root, file)
+        x = pickle.load(open(file, 'rb'))
+        if 'Pitch' in x.keys():
+            print(file, min(x['Pitch']), max(x['Pitch']))
