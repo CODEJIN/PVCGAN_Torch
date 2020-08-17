@@ -33,7 +33,7 @@ else:
     torch.cuda.set_device(0)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO, # level=logging.DEBUG,
     stream=sys.stdout,
     format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
     )
@@ -65,7 +65,7 @@ class Trainer:
 
         self.Load_Checkpoint()
 
-    def Datset_Generate(self):        
+    def Datset_Generate(self):
         train_Dataset = Train_Dataset()
         accumulation_Dataset = Accumulation_Dataset()
         dev_Dataset = Dev_Dataset()
@@ -195,7 +195,7 @@ class Trainer:
                 parameters= self.model.parameters(),
                 max_norm= hp_Dict['Train']['Gradient_Norm']
                 )
-
+        
         self.optimizer.step()
         self.scheduler.step()
 

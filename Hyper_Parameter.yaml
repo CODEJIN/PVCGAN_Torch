@@ -13,11 +13,11 @@ Sound:
 Num_Singers: 12
 
 Encoder:
-    Blocks: 2
+    Blocks: 3
     Stacks_in_Block: 3
     Channels: 128
     Kernel_Size: 3
-    Dropout_Rate: 0.0
+    Dropout_Rate: 0.1
 
 Singer_Classification:
     Dropout_Rate: 0.2
@@ -55,11 +55,11 @@ STFT_Loss_Resolution:
 
 
 # About `Train/Shared_Train_and_Eval`
-# When this value is true, the first 'Train/Wav_Length' length of each train pattern is excluded.
-# At the same time, the first 'Train/Wav_Length' length of each eval pattern is only used.
-# This function is used because the pattern amount of music vocal dataset like NUS-48 is usually not not so much.
+# When this value is true, the first triple of 'Train/Wav_Length' length of each train pattern is excluded.
+# At the same time, the first triple of 'Train/Wav_Length' length of each eval pattern is only used.
+# This function is used because the pattern amount of music vocal dataset like NUS-48 is usually small.
 Train:
-    Shared_Train_and_Eval: true  
+    Shared_Train_and_Eval: true
     Train_Pattern:
         Path: 'C:/Pattern/PN.Pattern.NUS48E'
         Metadata_File: 'METADATA.PICKLE'
@@ -70,8 +70,8 @@ Train:
             Apply_Delay: 0
         Back_Translate:
             Use: true
-            Apply_Delay: 50000
-        Accumulated_Dataset_Epoch: 100    # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
+            Apply_Delay: 0
+        Accumulated_Dataset_Epoch: 50    # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
         Path: 'C:/Pattern/PN.Pattern.NUS48E'
         Metadata_File: 'METADATA.PICKLE'
@@ -87,21 +87,21 @@ Train:
         Beta1: 0.9
         Beta2: 0.999
         Epsilon: 1.0e-7
-    Adversarial_Weight:
-        Discriminator: 0.1
+    Adversarial_Weight: # The values are bigger than 1.0, Generator and Encoder have advantage.
+        Discriminator: 4.0
         Singer_Classification: 0.1
         Pitch_Regression: 1.0
     Gradient_Norm: 5.0
     Max_Step: 400000
     Checkpoint_Save_Interval: 1000
-    Logging_Interval: 10
+    Logging_Interval: 50
     Evaluation_Interval: 1000
-    Inference_Interval: 2000
-    Initial_Inference: false
+    Inference_Interval: 5000
+    Initial_Inference: true
 
 Inference_Batch_Size: 4
 Use_Mixed_Precision: true
-Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10/Inference'
-Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10/Checkpoint'
-Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10/Log'
+Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10.Enc_BN/Inference'
+Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10.Enc_BN/Checkpoint'
+Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.AW_x10.Enc_BN/Log'
 Device: '0'

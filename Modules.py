@@ -16,17 +16,17 @@ class PVCGAN(torch.nn.Module):
             'Encoder': Encoder(),
             'Generator': Generator(),
             'Singer_Classification_Network': torch.nn.Sequential(
-                GRL(),
+                GRL(weight= hp_Dict['Train']['Adversarial_Weight']['Singer_Classification']),
                 Singer_Classification_Network()
                 ),
             'Pitch_Regression_Network': torch.nn.Sequential(
-                GRL(),
+                GRL(weight= hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression']),
                 Pitch_Regression_Network()
                 ),
             'Discriminator': Discriminator()
             })        
         self.layer_Dict['Discriminator_for_Fake'] = torch.nn.Sequential(
-            GRL(),
+            GRL(weight= hp_Dict['Train']['Adversarial_Weight']['Discriminator']),
             self.layer_Dict['Discriminator']
             )
 
@@ -55,7 +55,8 @@ class Generator(torch.nn.Module):
         self.layer_Dict['First'].add_module('Conv', Conv1d1x1(
             in_channels= 1,
             out_channels= hp_Dict['WaveNet']['Residual_Channels'],
-            bias= True
+            bias= True,
+            w_init_gain= 'relu'
             ))
         
         for block_Index in range(hp_Dict['WaveNet']['ResConvGLU']['Blocks']):
@@ -66,7 +67,7 @@ class Generator(torch.nn.Module):
                     skip_channels= hp_Dict['WaveNet']['ResConvGLU']['Skip_Channels'],
                     aux_channels= hp_Dict['Encoder']['Channels'],
                     singer_channels= hp_Dict['WaveNet']['Singer_Embedding'],
-                    pitch_channels= 1,                    
+                    pitch_channels= 1,
                     kernel_size= hp_Dict['WaveNet']['ResConvGLU']['Kernel_Size'],
                     dilation= 2 ** stack_Index,
                     dropout= hp_Dict['WaveNet']['ResConvGLU']['Dropout_Rate'],
@@ -78,13 +79,15 @@ class Generator(torch.nn.Module):
         self.layer_Dict['Last'].add_module('Conv_0', Conv1d1x1(
             in_channels= hp_Dict['WaveNet']['ResConvGLU']['Skip_Channels'],
             out_channels= hp_Dict['WaveNet']['ResConvGLU']['Skip_Channels'],
-            bias= True
+            bias= True,
+            w_init_gain= 'relu'
             ))
         self.layer_Dict['Last'].add_module('ReLU_1', torch.nn.ReLU(inplace= True))
         self.layer_Dict['Last'].add_module('Conv_1', Conv1d1x1(
             in_channels= hp_Dict['WaveNet']['ResConvGLU']['Skip_Channels'],
             out_channels= 1,
-            bias= True
+            bias= True,
+            w_init_gain= 'linear'
             ))  #[Batch, 1, Time]
         self.layer_Dict['Last'].add_module('Squeeze', Squeeze(dim= 1)) #[Batch, Time]
 
@@ -96,8 +99,10 @@ class Generator(torch.nn.Module):
             embedding_dim= hp_Dict['WaveNet']['Singer_Embedding']
             ))
         self.layer_Dict['Singer_Embedding'].add_module('Unsqueeze', Unsqueeze(dim= 2))
+        torch.nn.init.xavier_uniform_(self.layer_Dict['Singer_Embedding'][0].weight)
+        
 
-        self.layer_Dict['Pitch_Upsample'] = torch.nn.Sequential()        
+        self.layer_Dict['Pitch_Upsample'] = torch.nn.Sequential()
         self.layer_Dict['Pitch_Upsample'].add_module('Upsample', LinearUpsample1D(
             scale= hp_Dict['Sound']['Frame_Shift']
             ))
@@ -135,7 +140,7 @@ class Generator(torch.nn.Module):
 
     def apply_weight_norm(self):
         def _apply_weight_norm(m):
-            if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):                
+            if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):
                 torch.nn.utils.weight_norm(m)
                 logging.debug(f'Weight norm is applied to {m}.')
 
@@ -158,7 +163,8 @@ class Discriminator(torch.nn.Module):
                 kernel_size= hp_Dict['Discriminator']['Kernel_Size'],
                 padding= padding,
                 dilation= dilation,
-                bias= True
+                bias= True,
+                w_init_gain= 'leaky_relu'
                 ))
             self.layer.add_module('LeakyReLU_{}'.format(index),  torch.nn.LeakyReLU(
                 negative_slope= 0.2,
@@ -171,7 +177,8 @@ class Discriminator(torch.nn.Module):
             out_channels= 1,
             kernel_size= hp_Dict['Discriminator']['Kernel_Size'],
             padding= (hp_Dict['Discriminator']['Kernel_Size'] - 1) // 2,
-            bias= True
+            bias= True,
+            w_init_gain= 'linear'
             ))
         self.layer.add_module('Squeeze', Squeeze(dim= 1))
 
@@ -209,7 +216,8 @@ class Encoder(torch.nn.Module):
             out_channels= hp_Dict['Encoder']['Channels'],
             kernel_size= hp_Dict['Encoder']['Kernel_Size'],
             padding= (hp_Dict['Encoder']['Kernel_Size'] - 1) // 2,
-            bias= True
+            bias= True,
+            w_init_gain= 'relu'
             ))
         self.layer.add_module('ReLU', torch.nn.ReLU(
             inplace= True
@@ -225,11 +233,34 @@ class Encoder(torch.nn.Module):
         self.layer.add_module('Postnet', Conv1d1x1(
             in_channels= hp_Dict['Encoder']['Channels'],
             out_channels= hp_Dict['Encoder']['Channels'],
-            bias= True
+            bias= True,
+            w_init_gain= 'linear'
             ))
+
+        # self.apply_weight_norm()
 
     def forward(self, x):
         return self.layer(x)
+
+    
+    def remove_weight_norm(self):
+        def _remove_weight_norm(m):
+            try:
+                logging.debug(f'Weight norm is removed from {m}.')
+                torch.nn.utils.remove_weight_norm(m)
+            except ValueError:  # this module didn't have weight norm
+                return
+
+        self.apply(_remove_weight_norm)
+
+    def apply_weight_norm(self):
+        def _apply_weight_norm(m):
+            if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):                
+                torch.nn.utils.weight_norm(m)
+                logging.debug(f'Weight norm is applied to {m}.')
+
+        self.apply(_apply_weight_norm)
+
 
 class Singer_Classification_Network(torch.nn.Module):
     def __init__(self):
@@ -250,7 +281,8 @@ class Singer_Classification_Network(torch.nn.Module):
                 out_channels= channels,
                 kernel_size= kernel_size,
                 padding= (kernel_size - 1) // 2,
-                bias= True
+                bias= True,
+                w_init_gain= 'relu'
                 ))
             self.layer.add_module('ReLU_{}'.format(index), torch.nn.ReLU(
                 inplace= True
@@ -263,6 +295,7 @@ class Singer_Classification_Network(torch.nn.Module):
             out_features= hp_Dict['Num_Singers'],
             bias= True
             ))
+        torch.nn.init.xavier_uniform_(self.layer[-1].weight)
 
         self.apply_weight_norm()
 
@@ -297,7 +330,8 @@ class Pitch_Regression_Network(torch.nn.Module):
             in_channels= hp_Dict['Encoder']['Channels'],
             out_channels= hp_Dict['Encoder']['Channels'],
             kernel_size= hp_Dict['WaveNet']['Upsample']['Pad'] * 2 + 1,
-            bias= False
+            bias= False,
+            w_init_gain= 'linear'
             ))  # To match to the pitch length by no padding
 
         self.layer.add_module('Dropout', torch.nn.Dropout(
@@ -314,7 +348,8 @@ class Pitch_Regression_Network(torch.nn.Module):
                 out_channels= channels,
                 kernel_size= kernel_size,
                 padding= (kernel_size - 1) // 2,
-                bias= True
+                bias= True,
+                w_init_gain= 'relu'
                 ))
             self.layer.add_module('ReLU_{}'.format(index), torch.nn.ReLU(
                 inplace= True
@@ -324,14 +359,15 @@ class Pitch_Regression_Network(torch.nn.Module):
         self.layer.add_module('Conv1d1x1', Conv1d1x1(
             in_channels= previous_Channels,
             out_channels= 1,
-            bias= True
+            bias= True,
+            w_init_gain= 'linear'
             ))
         self.layer.add_module('Squeeze', Squeeze(dim= 1))   # [Batch, 1, Time] -> [Batch, Time]
 
         self.apply_weight_norm()
 
     def forward(self, x):
-        return self.layer(x)    # softmax is not applied like tf.
+        return self.layer(x)
 
     def apply_weight_norm(self):
         def _apply_weight_norm(m):
@@ -361,7 +397,8 @@ class UpsampleNet(torch.nn.Module):
             in_channels= hp_Dict['Encoder']['Channels'],
             out_channels= hp_Dict['Encoder']['Channels'],
             kernel_size= hp_Dict['WaveNet']['Upsample']['Pad'] * 2 + 1,
-            bias= False
+            bias= False,
+            w_init_gain= 'linear'
             ))  # [Batch, Mel_dim, Time]
         self.layer.add_module('Unsqueeze', Unsqueeze(dim= 1))    # [Batch, 1, Mel_dim, Time]
         for index, scale in enumerate(hp_Dict['WaveNet']['Upsample']['Scales']):
@@ -371,11 +408,12 @@ class UpsampleNet(torch.nn.Module):
                 out_channels= 1,
                 kernel_size= (1, scale * 2 + 1),
                 padding= (0, scale),
-                bias= False
+                bias= False,
+                w_init_gain= 'linear'
                 ))  # [Batch, 1, Mel_dim, Scaled_Time]
         self.layer.add_module('Squeeze', Squeeze(dim= 1))    # [Batch, Mel_dim, Scaled_Time]
 
-    def forward(self, x):        
+    def forward(self, x):
         return self.layer(x)
 
 class ResConvGLU(torch.nn.Module):
@@ -403,37 +441,43 @@ class ResConvGLU(torch.nn.Module):
             kernel_size= kernel_size,
             padding= (kernel_size - 1) // 2 * dilation,
             dilation= dilation,
-            bias= bias
+            bias= bias,
+            w_init_gain= 'tanh' #...but half is sigmoid....
             ))
 
         self.layer_Dict['Aux'] = Conv1d1x1(
             in_channels= aux_channels,
             out_channels= gate_channels,
-            bias= False
+            bias= False,
+            w_init_gain= 'tanh' #...but half is sigmoid....
             )
         
         self.layer_Dict['Singer'] = Conv1d1x1(
             in_channels= singer_channels,
             out_channels= gate_channels,
-            bias= False
+            bias= False,
+            w_init_gain= 'tanh' #...but half is sigmoid....
             )
 
         self.layer_Dict['Pitch'] = Conv1d1x1(
             in_channels= pitch_channels,
             out_channels= gate_channels,
-            bias= False
+            bias= False,
+            w_init_gain= 'tanh' #...but half is sigmoid....
             )
 
         self.layer_Dict['Out'] = Conv1d1x1(
             in_channels= gate_channels // 2,
             out_channels= residual_channels,
-            bias= bias
+            bias= bias,
+            w_init_gain= 'linear'
             )
 
         self.layer_Dict['Skip'] = Conv1d1x1(
             in_channels= gate_channels // 2,
             out_channels= skip_channels,
-            bias= bias
+            bias= bias,
+            w_init_gain= 'relu'
             )
 
     def forward(self, audios, auxs, singers, pitches):
@@ -477,7 +521,7 @@ class Encoder_Block(torch.nn.Module):
             self.layer.add_module('Layer_{}'.format(index), Encoder_Layer(
                 channels= channels,
                 kernel_size= kernel_size,
-                dilation= 2 ** index,
+                dilation= 1,
                 dropout= dropout,
                 bias= bias
                 ))
@@ -497,32 +541,29 @@ class Encoder_Layer(torch.nn.Module):
         super(Encoder_Layer, self).__init__()
 
         self.layer = torch.nn.Sequential()
-        self.layer.add_module('ReLU_0', torch.nn.ReLU(
-            # inplace= True
-            ))
-        self.layer.add_module('Dropout_0', torch.nn.Dropout(
-            p= dropout
-            ))
         self.layer.add_module('Conv_0', Conv1d(
             in_channels= channels,
             out_channels= channels,
             kernel_size= kernel_size,
             padding= (kernel_size - 1) // 2 * dilation,
             dilation= dilation,
-            bias= bias
+            bias= bias,
+            w_init_gain= 'relu'
             ))
-        self.layer.add_module('ReLU_1', torch.nn.ReLU(
-            # inplace= True
-            ))
-        self.layer.add_module('Dropout_1', torch.nn.Dropout(
+        self.layer.add_module('ReLU_0', torch.nn.ReLU())
+        self.layer.add_module('Dropout_0', torch.nn.Dropout(
             p= dropout
             ))
         self.layer.add_module('Conv_1', Conv1d1x1(
             in_channels= channels,
             out_channels= channels,
-            bias= bias
+            bias= bias,
+            w_init_gain= 'tanh'
             ))
-        self.layer.add_module('Tanh', torch.nn.Tanh())
+        self.layer.add_module('Tanh_1', torch.nn.Tanh())
+        self.layer.add_module('Dropout_1', torch.nn.Dropout(
+            p= dropout
+            ))
 
     def forward(self, x):
         return self.layer(x)
@@ -622,31 +663,40 @@ class Stretch2d(torch.nn.Module):
             )
 
 class Conv1d(torch.nn.Conv1d):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, w_init_gain, *args, **kwargs):
+        self.w_init_gain= w_init_gain
         super(Conv1d, self).__init__(*args, **kwargs)
 
     def reset_parameters(self):
-        torch.nn.init.kaiming_normal_(self.weight, nonlinearity='relu')
+        if self.w_init_gain in ['relu', 'leaky_relu']:
+            torch.nn.init.kaiming_uniform_(self.weight, nonlinearity= self.w_init_gain)
+        else:
+            torch.nn.init.xavier_uniform_(self.weight, gain= torch.nn.init.calculate_gain(self.w_init_gain))
         if not self.bias is None:
             torch.nn.init.zeros_(self.bias)
 
 class Conv1d1x1(Conv1d):
-    def __init__(self, in_channels, out_channels, bias):
+    def __init__(self, in_channels, out_channels, bias, w_init_gain):
         super(Conv1d1x1, self).__init__(
             in_channels= in_channels,
             out_channels= out_channels,
             kernel_size= 1,
             padding= 0,
             dilation= 1,
-            bias= bias
+            bias= bias,
+            w_init_gain= w_init_gain
             )
 
 class Conv2d(torch.nn.Conv2d):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, w_init_gain, *args, **kwargs):
+        self.w_init_gain = w_init_gain
         super(Conv2d, self).__init__(*args, **kwargs)
 
     def reset_parameters(self):
-        self.weight.data.fill_(1.0 / np.prod(self.kernel_size))
+        if self.w_init_gain in ['relu', 'leaky_relu']:
+            torch.nn.init.kaiming_uniform_(self.weight, nonlinearity= self.w_init_gain)
+        else:
+            torch.nn.init.xavier_uniform_(self.weight, gain= torch.nn.init.calculate_gain(self.w_init_gain))
         if not self.bias is None:
             torch.nn.init.zeros_(self.bias)
 

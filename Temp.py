@@ -171,8 +171,8 @@
 # logger.add_hparams({'a': 10, 'b': 0.2315412}, {}, global_step= 0)
 
 
-import pickle
-import matplotlib.pyplot as plt
+# import pickle
+# import matplotlib.pyplot as plt
 
 # jlee = pickle.load(open("C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.JLEE11.PICKLE", 'rb'))
 # mpol = pickle.load(open("C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing/NUS48E.MPOL11.PICKLE", 'rb'))
@@ -191,11 +191,80 @@ import matplotlib.pyplot as plt
 # plt.show()
 
 
-import os
+# import os
 
-for root, _, files in os.walk('C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing'):
-    for file in files:
-        file = os.path.join(root, file)
-        x = pickle.load(open(file, 'rb'))
-        if 'Pitch' in x.keys():
-            print(file, min(x['Pitch']), max(x['Pitch']))
+# for root, _, files in os.walk('C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing'):
+#     for file in files:
+#         file = os.path.join(root, file)
+#         x = pickle.load(open(file, 'rb'))
+#         if 'Pitch' in x.keys():
+#             print(file, min(x['Pitch']), max(x['Pitch']))
+
+
+
+
+
+
+# Referece: https://github.com/janfreyberg/pytorch-revgrad
+
+import torch
+
+class Func(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input_, x):
+        ctx.save_for_backward(input_)
+        ctx.x = x
+        output = input_
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):  # pragma: no cover
+        grad_input = None
+        if ctx.needs_input_grad[0]:
+            grad_input = -grad_output * ctx.x
+        return grad_input, None
+
+class GRL(torch.nn.Module):
+    def __init__(self, weight):
+        """
+        A gradient reversal layer.
+        This layer has no parameters, and simply reverses the gradient
+        in the backward pass.
+        """
+        super(GRL, self).__init__()
+        self.weight = weight
+
+    def forward(self, input_):
+        return Func.apply(input_, torch.FloatTensor([self.weight]))
+
+
+a = torch.nn.Conv1d(4, 5, 3, 1, 1)
+b = GRL(.5)
+c = torch.nn.Conv1d(5, 4, 3, 1, 1)
+
+optim = torch.optim.SGD(
+    list(a.parameters()) + list(b.parameters()) + list(c.parameters()),
+    0.1
+    )
+
+x = torch.randn(1, 4, 1)
+
+y = c(a(x))
+loss = torch.nn.MSELoss()(x, y)
+optim.zero_grad()
+loss.backward()
+print(a.weight.grad)
+print('#' * 100)
+
+y = c(b(a(x)))
+loss = torch.nn.MSELoss()(x, y)
+optim.zero_grad()
+loss.backward()
+print(a.weight.grad)
+
+
+
+
+
+
+
