@@ -16,7 +16,7 @@ class Func(torch.autograd.Function):
         grad_input = None
         if ctx.needs_input_grad[0]:
             grad_input = -ctx.weight * grad_output
-        return grad_input
+        return grad_input, None
 
 class GRL(torch.nn.Module):
     def __init__(self, weight= 1.0):
@@ -29,4 +29,7 @@ class GRL(torch.nn.Module):
         self.weight = weight
 
     def forward(self, input_):
-        return Func.apply(input_, torch.FloatTensor([self.weight]))
+        return Func.apply(
+            input_,
+            torch.FloatTensor([self.weight]).to(device= input_.device)
+            )

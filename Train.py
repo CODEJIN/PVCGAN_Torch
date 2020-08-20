@@ -130,6 +130,7 @@ class Trainer:
             lr= hp_Dict['Train']['Learning_Rate']['Initial'],
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
+            weight_decay= hp_Dict['Train']['Weight_Decay']
             )
         self.scheduler = Modified_Noam_Scheduler(
             optimizer= self.optimizer,
@@ -155,7 +156,7 @@ class Trainer:
         noises = noises.to(device, non_blocking=True)
 
         # Generator
-        fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
+        fakes, predicted_Singers, predicted_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
             mels= mels,
             pitches= pitches,
             singers= audio_Singers,
@@ -167,20 +168,19 @@ class Trainer:
         loss_Dict['Generator/Spectral_Convergence'], loss_Dict['Generator/Magnitude'] = self.criterion_Dict['STFT'](fakes, audios)
         loss_Dict['Generator'] = loss_Dict['Generator/Spectral_Convergence'] + loss_Dict['Generator/Magnitude']
         
-        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
-        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
-        loss_Dict['Confuser'] = \
-            hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Confuser/Singer'] + \
-            hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
+        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](predicted_Singers, mel_Singers)
+        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](predicted_Pitches, pitches)
+        loss_Dict['Confuser'] =  loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
+        loss = loss_Dict['Generator'] + loss_Dict['Confuser']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
             loss_Dict['Discriminator/Fake'] = self.criterion_Dict['MSE'](fakes_Discriminations, torch.zeros_like(fakes_Discriminations))   # Discriminator thinks that 0 is correct.
             loss_Dict['Discriminator/Real'] = self.criterion_Dict['MSE'](reals_Discriminations, torch.ones_like(reals_Discriminations))  # Discriminator thinks that 1 is correct.
 
             loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
+            loss += loss_Dict['Discriminator']
                 
         self.optimizer.zero_grad()
-        loss = loss_Dict['Generator'] + loss_Dict['Confuser'] + hp_Dict['Train']['Adversarial_Weight']['Discriminator'] * loss_Dict['Discriminator']
 
         if hp_Dict['Use_Mixed_Precision']:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
@@ -252,7 +252,7 @@ class Trainer:
         noises = noises.to(device, non_blocking=True)
 
         # Generator
-        fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
+        fakes, predicted_Singers, predicted_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
             mels= mels,
             pitches= pitches,
             singers= audio_Singers,
@@ -264,21 +264,22 @@ class Trainer:
         loss_Dict['Generator/Spectral_Convergence'], loss_Dict['Generator/Magnitude'] = self.criterion_Dict['STFT'](fakes, audios)
         loss_Dict['Generator'] = loss_Dict['Generator/Spectral_Convergence'] + loss_Dict['Generator/Magnitude']
         
-        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
-        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
-        loss_Dict['Confuser'] = \
-            hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Confuser/Singer'] + \
-            hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
+        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](predicted_Singers, mel_Singers)
+        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](predicted_Pitches, pitches)
+        loss_Dict['Confuser'] =  loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
+        loss = loss_Dict['Generator'] + loss_Dict['Confuser']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
             loss_Dict['Discriminator/Fake'] = self.criterion_Dict['MSE'](fakes_Discriminations, torch.zeros_like(fakes_Discriminations))   # Discriminator thinks that 0 is correct.
             loss_Dict['Discriminator/Real'] = self.criterion_Dict['MSE'](reals_Discriminations, torch.ones_like(reals_Discriminations))  # Discriminator thinks that 1 is correct.
-            loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
 
+            loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
+            loss += loss_Dict['Discriminator']
+            
         for tag, loss in loss_Dict.items():
             self.scalar_Dict['Evaluation']['Loss/{}'.format(tag)] += loss
 
-        return fakes, classified_Singers, classified_Pitches
+        return fakes, predicted_Singers, predicted_Pitches
 
     def Evaluation_Epoch(self):
         logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
@@ -290,7 +291,7 @@ class Trainer:
             desc='[Evaluation]',
             total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp_Dict['Train']['Batch_Size'])
             ):
-            fakes, classified_Singers, classified_Pitches = self.Evaluation_Step(audios, mels, pitches, audio_Singers, mel_Singers, noises)
+            fakes, predicted_Singers, predicted_Pitches = self.Evaluation_Step(audios, mels, pitches, audio_Singers, mel_Singers, noises)
 
         self.scalar_Dict['Evaluation'] = {
             tag: loss / step
@@ -301,13 +302,13 @@ class Trainer:
         self.scalar_Dict['Evaluation'] = defaultdict(float)
 
         self.writer_Dict['Evaluation'].add_image_dict({
-            'Mel': mels[-1].cpu().numpy(),
-            'Audio/Real': audios[-1].cpu().numpy(),
-            'Audio/Fake': fakes[-1].cpu().numpy(),
-            'Pitch/Original': pitches[-1].cpu().numpy(),
-            'Pitch/Classified': classified_Pitches[-1].cpu().numpy(),
-            'Singer/Original': torch.nn.functional.one_hot(mel_Singers, hp_Dict['Num_Singers']).cpu().numpy(),
-            'Singer/Classified': torch.softmax(classified_Singers, dim= -1).cpu().numpy(),
+            'Mel': (mels[-1].cpu().numpy(), None),
+            'Audio/Original': (audios[-1].cpu().numpy(), None),
+            'Audio/Predicted': (fakes[-1].cpu().numpy(), None),
+            'Pitch/Original': (pitches[-1].cpu().numpy(), None),
+            'Pitch/Predicted': (predicted_Pitches[-1].cpu().numpy(), None),
+            'Singer/Original': (torch.nn.functional.one_hot(mel_Singers, hp_Dict['Num_Singers']).cpu().numpy(), None),
+            'Singer/Predicted': (torch.softmax(predicted_Singers, dim= -1).cpu().numpy(), None),
             }, self.steps)
         
         self.model.train()
@@ -529,8 +530,10 @@ class Trainer:
             with open(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameters.yaml').replace("\\", "/"), "w") as f:
                 yaml.dump(hp_Dict, f)
 
-        if hp_Dict['Train']['Initial_Inference']:
+        if self.steps == 0:
             self.Evaluation_Epoch()
+
+        if hp_Dict['Train']['Initial_Inference']:
             self.Inference_Epoch()
 
         self.tqdm = tqdm(

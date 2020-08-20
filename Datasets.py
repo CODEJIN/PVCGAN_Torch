@@ -103,9 +103,9 @@ class Train_Dataset(Dataset):
         if hp_Dict['Train']['Shared_Train_and_Eval']:
             self.pattern_List = [
                 (
-                    audio[hp_Dict['Train']['Wav_Length'] * 3:],
-                    mel[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 3:],
-                    pitch[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 3:],
+                    audio[hp_Dict['Train']['Wav_Length'] * 5:],
+                    mel[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 5:],
+                    pitch[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 5:],
                     audio_Singer,
                     mel_Singer
                     )
@@ -140,9 +140,9 @@ class Dev_Dataset(Dataset):
             hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift']
             self.pattern_List = [
                 (
-                    audio[:hp_Dict['Train']['Wav_Length'] * 3],
-                    mel[:hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 3],
-                    pitch[:hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 3],
+                    audio[:hp_Dict['Train']['Wav_Length'] * 5],
+                    mel[:hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 5],
+                    pitch[:hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 5],
                     audio_Singer,
                     mel_Singer
                     )
@@ -161,9 +161,9 @@ class Accumulation_Dataset(Dataset):
         if hp_Dict['Train']['Shared_Train_and_Eval']:
             self.pattern_List = [
                 (
-                    audio[hp_Dict['Train']['Wav_Length'] * 3:],
-                    mel[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 3:],
-                    pitch[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 3:],
+                    audio[hp_Dict['Train']['Wav_Length'] * 5:],
+                    mel[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 5:],
+                    pitch[hp_Dict['Train']['Wav_Length'] // hp_Dict['Sound']['Frame_Shift'] * 5:],
                     singer
                     )
                 for audio, mel, pitch, singer, _ in self.pattern_List
