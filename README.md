@@ -1,5 +1,3 @@
-__※ This project has been discontinued. If you would like to suggest any improvements, please register as an issue.__
-
 # Parallel Voice Conversion GAN
 
 This code is an implementation of Parallel Voice Conversion GAN(PVCGAN). The algorithm is based on the following papers:
@@ -114,7 +112,7 @@ python Train.py -s <int>
     * Default is 0.
 
 # Result
-    * https://codejin.github.io/PVCGAN_Demo/index.html
+    * https://codejin.github.io/PVCGAN_Demo
 
 # Trained checkpoint
 
