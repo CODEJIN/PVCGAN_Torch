@@ -5,7 +5,7 @@ import yaml, math, logging
 
 from Gradient_Reversal_Layer import GRL
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 class PVCGAN(torch.nn.Module):

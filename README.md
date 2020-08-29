@@ -21,12 +21,12 @@ Please see the 'requirements.txt'.
 Currently uploaded code is compatible with NUS-48E datasets: [NUS-48E](https://smcnus.comp.nus.edu.sg/nus-48e-sung-and-spoken-lyrics-corpus/)
 
 # Hyper parameters
-Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameter.yaml' according to your environment.
+Before proceeding, please set the pattern, inference, and checkpoint paths in 'Hyper_Parameters.yaml' according to your environment.
 
 * Sound
     * Setting basic sound parameters.
 
-* Sound
+* Num_Singers
     * The number of singers.
 
 * Encoder
@@ -51,9 +51,20 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in 'H
 * Train
     * Setting the parameters of training.    
     * Wav length must be a multiple of frame shift size of sound.
+    * Shared_Train_and_Eval
+        * This function is used because the pattern amount of music vocal dataset like NUS-48 is usually small.
+        * When this value is true, the initial 'Wav_Length * 5' length of each train pattern is excluded in training.
+        * At the same time, the initial 'Wav_Length * 5' length of each eval pattern is only used in evaluation.
+    * Adversarial_Weight
+        * These paratmers set the weight of reversed gradients by `GRL`.
+        * The values are bigger than 1.0, `Generator` and `Encoder` have advantage.
+        * If you want to change the dataset or parameters, I recommend to check the images and histogram in Tensorboard.
+            * If the plots are not changed while several steps, model's adversarial balancing may be broken.
+            * If so, please decrease the weight parameter to intensify the discriminator, classifier, or regressor.
     
 * Use_Mixed_Precision
     * __Currently, this parameters is ignored.__ 
+    * Several parameters including adversarial weights are affected by the bits of float.
        
 * Inference_Path
     * Setting the inference path
@@ -66,7 +77,7 @@ Before proceeding, please set the pattern, inference, and checkpoint paths in 'H
 
 * Device
     * Setting which GPU device is used in multi-GPU enviornment.
-    * Or, if using only CPU, please set '-1'.
+    * Or, if using only CPU, please set '-1'. (But, I don't recommend while training.)
 
 # Generate pattern
 
@@ -102,35 +113,10 @@ python Train.py -s <int>
     * The resume step parameter.
     * Default is 0.
 
-# Inference
-
 # Result
-
-* JLEE -> JLEE (original)
-
-![Figure_0](./Example_Results/Figures/Step-400000.IDX_0.PNG)
-
-* JLEE -> JTAN (original)
-
-![Figure_0](./Example_Results/Figures/Step-400000.IDX_1.PNG)
-
-* JLEE -> KENN (original)
-
-![Figure_0](./Example_Results/Figures/Step-400000.IDX_2.PNG)
-
-* JLEE -> SAMF (original)
-
-![Figure_0](./Example_Results/Figures/Step-400000.IDX_3.PNG)
-
-* JLEE -> VKOW (original)
-
-![Figure_0](./Example_Results/Figures/Step-400000.IDX_4.PNG)
-
-* JLEE -> ZHIY (original)
-
-![Figure_0](./Example_Results/Figures/Step-400000.IDX_5.PNG)
+    * https://codejin.github.io/PVCGAN_Demo/index.html
 
 # Trained checkpoint
 
-* [Checkpoint](./Example_Results/Checkpoint/S_400000.pkl)
-* [Hyper parameter](./Example_Results/Checkpoint/Hyper_Parameters.yaml)
+* [Checkpoint](./Checkpoint/S_400000.pkl)
+* [Hyper parameter](./Checkpoint/Hyper_Parameters.yaml)

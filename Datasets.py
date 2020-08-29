@@ -3,7 +3,7 @@ import numpy as np
 import yaml, librosa, pickle, os
 from random import choice
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 

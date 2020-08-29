@@ -6,7 +6,7 @@
 # import matplotlib.pyplot as plt 
 # from scipy.ndimage import gaussian_filter1d
 
-# with open('Hyper_Parameter.yaml') as f:
+# with open('Hyper_Parameters.yaml') as f:
 #     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 # os.environ['CUDA_VISIBLE_DEVICES']= '1'
@@ -166,7 +166,7 @@
 
 # logger = Logger('/home/heejo/Documents/Personal/T')
 
-# with open('Hyper_Parameter.yaml') as f:
+# with open('Hyper_Parameters.yaml') as f:
 #     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 # logger.add_hparams({'a': 10, 'b': 0.2315412}, {}, global_step= 0)
 
@@ -207,64 +207,116 @@
 
 # Referece: https://github.com/janfreyberg/pytorch-revgrad
 
-import torch
+# import torch
 
-class Func(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input_, x):
-        ctx.save_for_backward(input_)
-        ctx.x = x
-        output = input_
-        return output
+# class Func(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, input_, x):
+#         ctx.save_for_backward(input_)
+#         ctx.x = x
+#         output = input_
+#         return output
 
-    @staticmethod
-    def backward(ctx, grad_output):  # pragma: no cover
-        grad_input = None
-        if ctx.needs_input_grad[0]:
-            grad_input = -grad_output * ctx.x
-        return grad_input, None
+#     @staticmethod
+#     def backward(ctx, grad_output):  # pragma: no cover
+#         grad_input = None
+#         if ctx.needs_input_grad[0]:
+#             grad_input = -grad_output * ctx.x
+#         return grad_input, None
 
-class GRL(torch.nn.Module):
-    def __init__(self, weight):
-        """
-        A gradient reversal layer.
-        This layer has no parameters, and simply reverses the gradient
-        in the backward pass.
-        """
-        super(GRL, self).__init__()
-        self.weight = weight
+# class GRL(torch.nn.Module):
+#     def __init__(self, weight):
+#         """
+#         A gradient reversal layer.
+#         This layer has no parameters, and simply reverses the gradient
+#         in the backward pass.
+#         """
+#         super(GRL, self).__init__()
+#         self.weight = weight
 
-    def forward(self, input_):
-        return Func.apply(input_, torch.FloatTensor([self.weight]))
-
-
-a = torch.nn.Conv1d(4, 5, 3, 1, 1)
-b = GRL(.5)
-c = torch.nn.Conv1d(5, 4, 3, 1, 1)
-
-optim = torch.optim.SGD(
-    list(a.parameters()) + list(b.parameters()) + list(c.parameters()),
-    0.1
-    )
-
-x = torch.randn(1, 4, 1)
-
-y = c(a(x))
-loss = torch.nn.MSELoss()(x, y)
-optim.zero_grad()
-loss.backward()
-print(a.weight.grad)
-print('#' * 100)
-
-y = c(b(a(x)))
-loss = torch.nn.MSELoss()(x, y)
-optim.zero_grad()
-loss.backward()
-print(a.weight.grad)
+#     def forward(self, input_):
+#         return Func.apply(input_, torch.FloatTensor([self.weight]))
 
 
+# a = torch.nn.Conv1d(4, 5, 3, 1, 1)
+# b = GRL(.5)
+# c = torch.nn.Conv1d(5, 4, 3, 1, 1)
+
+# optim = torch.optim.SGD(
+#     list(a.parameters()) + list(b.parameters()) + list(c.parameters()),
+#     0.1
+#     )
+
+# x = torch.randn(1, 4, 1)
+
+# y = c(a(x))
+# loss = torch.nn.MSELoss()(x, y)
+# optim.zero_grad()
+# loss.backward()
+# print(a.weight.grad)
+# print('#' * 100)
+
+# y = c(b(a(x)))
+# loss = torch.nn.MSELoss()(x, y)
+# optim.zero_grad()
+# loss.backward()
+# print(a.weight.grad)
 
 
 
 
 
+
+
+# from yin import pitch_calc
+
+# import librosa, yaml, os
+# import numpy as np
+# import matplotlib.pyplot as plt 
+# from Audio import Audio_Prep
+
+# audio1 = Audio_Prep('D:/Pattern/Sing/NUS48E/PMAR/sing/05.wav', 24000, 20)
+# pitch1 = pitch_calc(
+#     sig= audio1,
+#     sr= 24000,
+#     w_len= 1024,
+#     w_step= 256,
+#     confidence_threshold= 0.6,
+#     gaussian_smoothing_sigma= 0.0,
+#     f0_min=100,
+#     f0_max=500,
+#     )
+# audio2 = Audio_Prep('D:/Pattern/Sing/NUS48E/JLEE/sing/05.wav', 24000, 20)
+# pitch2 = pitch_calc(
+#     sig= audio2,
+#     sr= 24000,
+#     w_len= 1024,
+#     w_step= 256,
+#     confidence_threshold= 0.6,
+#     gaussian_smoothing_sigma= 0.0,
+#     f0_min=100,
+#     f0_max=500,
+#     )
+
+# print(min(pitch1))
+# print(min(pitch2))
+
+# print(np.mean(pitch1))
+# print(np.mean(pitch2))
+
+# plt.subplot(221)
+# plt.plot(audio1)
+# plt.subplot(222)
+# plt.plot(audio2)
+# plt.subplot(223)
+# plt.plot(pitch1)
+# plt.subplot(224)
+# plt.plot(pitch2)
+# plt.tight_layout()
+# plt.show()
+
+import pickle
+import numpy as np
+
+print(np.mean(pickle.load(open("C:/Pattern/PN.Pattern.NUS48E/NUS48E.PMAR05.PICKLE", 'rb'))['Pitch']))
+print(np.mean(pickle.load(open("C:/Pattern/PN.Pattern.NUS48E/NUS48E.JLEE05.PICKLE", 'rb'))['Pitch']))

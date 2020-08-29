@@ -67,10 +67,10 @@ Train:
             Use: true
             Min_Beta: 0.3
             Max_Beta: 0.7
-            Apply_Delay: 100000
+            Apply_Delay: 0
         Back_Translate:
             Use: true
-            Apply_Delay: 100000
+            Apply_Delay: 0
         Accumulated_Dataset_Epoch: 50    # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
         Path: 'C:/Pattern/PN.Pattern.NUS48E'
@@ -82,15 +82,15 @@ Train:
     Learning_Rate:
         Initial: 1.0e-3
         Base: 4000
-    Discriminator_Delay: 100000
+    Discriminator_Delay: 100000 # When all delay was 0, failed.
     ADAM:
         Beta1: 0.9
         Beta2: 0.999
         Epsilon: 1.0e-7
     Adversarial_Weight: # The values are bigger than 1.0, Generator and Encoder have advantage.
         Discriminator: 1.0
-        Singer_Classification: 0.05
-        Pitch_Regression: 0.5
+        Singer_Classification: 0.1
+        Pitch_Regression: 0.7   # 0.8 TO 1.0 was failed.
     Gradient_Norm: 1.0
     Weight_Decay: 1.0e-6
     Max_Step: 400000
@@ -102,7 +102,7 @@ Train:
 
 Inference_Batch_Size: 4
 Use_Mixed_Precision: false  #Model was dead when using 16bit.
-Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_5e-1.S_5e-2/Inference'
-Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_5e-1.S_5e-2/Checkpoint'
-Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_5e-1.S_5e-2/Log'
+Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Inference'
+Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Checkpoint'
+Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Log'
 Device: '0'

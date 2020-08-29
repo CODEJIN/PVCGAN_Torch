@@ -19,7 +19,7 @@ from Noam_Scheduler import Modified_Noam_Scheduler
 from Pattern_Generator import Pattern_Generate
 from yin import pitch_calc
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 if not hp_Dict['Device'] is None:
@@ -525,7 +525,7 @@ class Trainer:
         logging.info('Checkpoint saved at {} steps.'.format(self.steps))
 
     def Train(self):
-        if not os.path.exists(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameter.yaml')):
+        if not os.path.exists(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameters.yaml')):
             os.makedirs(hp_Dict['Checkpoint_Path'], exist_ok= True)
             with open(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameters.yaml').replace("\\", "/"), "w") as f:
                 yaml.dump(hp_Dict, f)

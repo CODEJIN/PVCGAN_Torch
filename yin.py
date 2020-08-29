@@ -127,7 +127,7 @@ def compute_yin(sig, sr, w_len=512, w_step=256, f0_min=100, f0_max=500,
         sig = np.pad(sig, (w_step + w_len - sig.shape[0] % w_step) // 2, mode=pad_mode)
 
     tau_min = int(sr / f0_max)
-    tau_max = int(sr / f0_min)
+    tau_max = int(sr / (f0_min + 1e-7))
 
     timeScale = range(0, len(sig) - w_len, w_step)  # time values for each analysis window
     times = [t/float(sr) for t in timeScale]
@@ -175,7 +175,9 @@ def pitch_calc(
         sr= sr,
         w_len= w_len,
         w_step= w_step,
-        harmo_thresh= 1 - confidence_threshold
+        harmo_thresh= 1 - confidence_threshold,
+        f0_min= f0_min,
+        f0_max= f0_max
         )[0]
     if gaussian_smoothing_sigma > 0.0:
         pitch = gaussian_filter1d(pitch, sigma= gaussian_smoothing_sigma)

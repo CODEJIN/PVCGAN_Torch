@@ -8,7 +8,7 @@ from tqdm import tqdm
 from Audio import Audio_Prep, Mel_Generate
 from yin import pitch_calc
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
