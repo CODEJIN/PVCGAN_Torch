@@ -5,7 +5,7 @@ import yaml, math, logging
 
 from Gradient_Reversal_Layer import GRL
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 class PVCGAN(torch.nn.Module):
@@ -16,17 +16,17 @@ class PVCGAN(torch.nn.Module):
             'Encoder': Encoder(),
             'Generator': Generator(),
             'Singer_Classification_Network': torch.nn.Sequential(
-                GRL(),
+                GRL(weight= hp_Dict['Train']['Adversarial_Weight']['Singer_Classification']),
                 Singer_Classification_Network()
                 ),
             'Pitch_Regression_Network': torch.nn.Sequential(
-                GRL(),
+                GRL(weight= hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression']),
                 Pitch_Regression_Network()
                 ),
             'Discriminator': Discriminator()
             })        
         self.layer_Dict['Discriminator_for_Fake'] = torch.nn.Sequential(
-            GRL(),
+            GRL(weight= hp_Dict['Train']['Adversarial_Weight']['Discriminator']),
             self.layer_Dict['Discriminator']
             )
 
@@ -34,8 +34,8 @@ class PVCGAN(torch.nn.Module):
         encodings = self.layer_Dict['Encoder'](mels)
         fakes = self.layer_Dict['Generator'](noises, encodings, singers, pitches)
 
-        classified_Singers = self.layer_Dict['Singer_Classification_Network'](encodings)
-        classified_Pitches = self.layer_Dict['Pitch_Regression_Network'](encodings)
+        predicted_Singers = self.layer_Dict['Singer_Classification_Network'](encodings)
+        predicted_Pitches = self.layer_Dict['Pitch_Regression_Network'](encodings)
 
         fakes_Discriminations = None
         reals_Discriminations = None
@@ -43,7 +43,7 @@ class PVCGAN(torch.nn.Module):
             fakes_Discriminations = self.layer_Dict['Discriminator_for_Fake'](fakes)
             reals_Discriminations = self.layer_Dict['Discriminator'](reals)
 
-        return fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations
+        return fakes, predicted_Singers, predicted_Pitches, fakes_Discriminations, reals_Discriminations
 
 class Generator(torch.nn.Module):
     def __init__(self):
@@ -66,7 +66,7 @@ class Generator(torch.nn.Module):
                     skip_channels= hp_Dict['WaveNet']['ResConvGLU']['Skip_Channels'],
                     aux_channels= hp_Dict['Encoder']['Channels'],
                     singer_channels= hp_Dict['WaveNet']['Singer_Embedding'],
-                    pitch_channels= 1,                    
+                    pitch_channels= 1,
                     kernel_size= hp_Dict['WaveNet']['ResConvGLU']['Kernel_Size'],
                     dilation= 2 ** stack_Index,
                     dropout= hp_Dict['WaveNet']['ResConvGLU']['Dropout_Rate'],
@@ -96,20 +96,21 @@ class Generator(torch.nn.Module):
             embedding_dim= hp_Dict['WaveNet']['Singer_Embedding']
             ))
         self.layer_Dict['Singer_Embedding'].add_module('Unsqueeze', Unsqueeze(dim= 2))
+        torch.nn.init.xavier_uniform_(self.layer_Dict['Singer_Embedding'][0].weight)
+        
 
-        self.layer_Dict['Pitch_Upsample'] = torch.nn.Sequential()        
-        self.layer_Dict['Pitch_Upsample'].add_module('Upsample', LinearUpsample1D(
-            scale= hp_Dict['Sound']['Frame_Shift']
-            ))
-        self.layer_Dict['Pitch_Upsample'].add_module('Unsqueeze', Unsqueeze(dim= 1))  #[Batch, 1, Time]
-
+        self.layer_Dict['Pitch_Upsample'] = torch.nn.Upsample(  #[Batch, 1, Time]
+            scale_factor= hp_Dict['Sound']['Frame_Shift'],
+            mode= 'linear',
+            align_corners=True
+            )
 
         self.apply_weight_norm()
         
     def forward(self, x, auxs, singers, pitches):
         auxs = self.layer_Dict['Upsample'](auxs)
         singers = self.layer_Dict['Singer_Embedding'](singers)
-        pitches = self.layer_Dict['Pitch_Upsample'](pitches)        
+        pitches = self.layer_Dict['Pitch_Upsample'](pitches.unsqueeze(1))   #[Batch, 1, Time]
 
         x = self.layer_Dict['First'](x)
         skips = 0
@@ -119,7 +120,7 @@ class Generator(torch.nn.Module):
                 skips += new_Skips
         skips *= math.sqrt(1.0 / (hp_Dict['WaveNet']['ResConvGLU']['Blocks'] * hp_Dict['WaveNet']['ResConvGLU']['Stacks_in_Block']))
 
-        logits = self.layer_Dict['Last'](skips)        
+        logits = self.layer_Dict['Last'](skips)
 
         return logits
 
@@ -135,7 +136,7 @@ class Generator(torch.nn.Module):
 
     def apply_weight_norm(self):
         def _apply_weight_norm(m):
-            if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):                
+            if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):
                 torch.nn.utils.weight_norm(m)
                 logging.debug(f'Weight norm is applied to {m}.')
 
@@ -225,49 +226,79 @@ class Encoder(torch.nn.Module):
         self.layer.add_module('Postnet', Conv1d1x1(
             in_channels= hp_Dict['Encoder']['Channels'],
             out_channels= hp_Dict['Encoder']['Channels'],
-            bias= True
+            bias= True,
+            w_init_gain= 'linear'
             ))
+
+        # self.apply_weight_norm()
 
     def forward(self, x):
         return self.layer(x)
 
+    
+    # def remove_weight_norm(self):
+    #     def _remove_weight_norm(m):
+    #         try:
+    #             logging.debug(f'Weight norm is removed from {m}.')
+    #             torch.nn.utils.remove_weight_norm(m)
+    #         except ValueError:  # this module didn't have weight norm
+    #             return
+
+    #     self.apply(_remove_weight_norm)
+
+    # def apply_weight_norm(self):
+    #     def _apply_weight_norm(m):
+    #         if isinstance(m, torch.nn.Conv1d) or isinstance(m, torch.nn.Conv2d):
+    #             torch.nn.utils.weight_norm(m)
+    #             logging.debug(f'Weight norm is applied to {m}.')
+
+    #     self.apply(_apply_weight_norm)
+
+
 class Singer_Classification_Network(torch.nn.Module):
     def __init__(self):
         super(Singer_Classification_Network, self).__init__()
+        self.layer_Dict = torch.nn.ModuleDict()
 
-        self.layer = torch.nn.Sequential()
-        self.layer.add_module('Dropout', torch.nn.Dropout(
+        self.layer_Dict['Dropout'] = torch.nn.Dropout(
             p= hp_Dict['Singer_Classification']['Dropout_Rate']
-            ))
+            )
+
+        self.layer_Dict['Conv'] = torch.nn.Sequential()
+
         previous_Channels = hp_Dict['Encoder']['Channels']
-        
         for index, (channels, kernel_size) in enumerate(zip(
             hp_Dict['Singer_Classification']['Channels'],
             hp_Dict['Singer_Classification']['Kernel_Size']
             )):
-            self.layer.add_module('Conv_{}'.format(index), Conv1d(
+            self.layer_Dict['Conv'].add_module('Conv_{}'.format(index), Conv1d(
                 in_channels= previous_Channels,
                 out_channels= channels,
                 kernel_size= kernel_size,
                 padding= (kernel_size - 1) // 2,
                 bias= True
                 ))
-            self.layer.add_module('ReLU_{}'.format(index), torch.nn.ReLU(
+            self.layer_Dict['Conv'].add_module('ReLU_{}'.format(index), torch.nn.ReLU(
                 inplace= True
                 ))
             previous_Channels = channels
-        
-        self.layer.add_module('Average', Average(dim= 2))   #Average by time
-        self.layer.add_module('Linear', torch.nn.Linear(
-            in_features= hp_Dict['Singer_Classification']['Channels'][-1],
-            out_features= hp_Dict['Num_Singers'],
-            bias= True
-            ))
+
+        self.layer_Dict['Project'] = Conv1d1x1(
+            in_channels= previous_Channels,
+            out_channels= hp_Dict['Num_Singers'],
+            bias= True,
+            w_init_gain= 'linear'
+            )
 
         self.apply_weight_norm()
 
     def forward(self, x):
-        return self.layer(x)    # softmax is not applied like tf.
+        x = self.layer_Dict['Dropout'](x)
+        x = self.layer_Dict['Conv'](x)
+        x = torch.mean(x, dim= 2, keepdim= True)
+        x = self.layer_Dict['Project'](x)
+        
+        return x.squeeze(2)
 
     def apply_weight_norm(self):
         def _apply_weight_norm(m):
@@ -291,47 +322,55 @@ class Pitch_Regression_Network(torch.nn.Module):
     def __init__(self):
         super(Pitch_Regression_Network, self).__init__()
 
-        self.layer = torch.nn.Sequential()
-        
-        self.layer.add_module('Indent_Conv', Conv1d(
+        self.layer_Dict = torch.nn.ModuleDict()
+
+        self.layer_Dict['Indent_Conv'] = Conv1d(
             in_channels= hp_Dict['Encoder']['Channels'],
             out_channels= hp_Dict['Encoder']['Channels'],
             kernel_size= hp_Dict['WaveNet']['Upsample']['Pad'] * 2 + 1,
-            bias= False
-            ))  # To match to the pitch length by no padding
+            bias= False,
+            w_init_gain= 'linear'
+            )  # To match to the pitch length by no padding
 
-        self.layer.add_module('Dropout', torch.nn.Dropout(
-            p= hp_Dict['Pitch_Regression']['Dropout_Rate']
-            ))
-        
+        self.layer_Dict['Dropout'] = torch.nn.Dropout(
+            p= hp_Dict['Singer_Classification']['Dropout_Rate']
+            )
+
+        self.layer_Dict['Conv'] = torch.nn.Sequential()
+
         previous_Channels = hp_Dict['Encoder']['Channels']
         for index, (channels, kernel_size) in enumerate(zip(
-            hp_Dict['Pitch_Regression']['Channels'],
-            hp_Dict['Pitch_Regression']['Kernel_Size']
+            hp_Dict['Singer_Classification']['Channels'],
+            hp_Dict['Singer_Classification']['Kernel_Size']
             )):
-            self.layer.add_module('Conv_{}'.format(index), Conv1d(
+            self.layer_Dict['Conv'].add_module('Conv_{}'.format(index), Conv1d(
                 in_channels= previous_Channels,
                 out_channels= channels,
                 kernel_size= kernel_size,
                 padding= (kernel_size - 1) // 2,
                 bias= True
                 ))
-            self.layer.add_module('ReLU_{}'.format(index), torch.nn.ReLU(
+            self.layer_Dict['Conv'].add_module('ReLU_{}'.format(index), torch.nn.ReLU(
                 inplace= True
                 ))
             previous_Channels = channels
-        
-        self.layer.add_module('Conv1d1x1', Conv1d1x1(
+
+        self.layer_Dict['Project'] = Conv1d1x1(
             in_channels= previous_Channels,
             out_channels= 1,
-            bias= True
-            ))
-        self.layer.add_module('Squeeze', Squeeze(dim= 1))   # [Batch, 1, Time] -> [Batch, Time]
-
+            bias= True,
+            w_init_gain= 'linear'
+            )
+        
         self.apply_weight_norm()
 
     def forward(self, x):
-        return self.layer(x)    # softmax is not applied like tf.
+        x = self.layer_Dict['Indent_Conv'](x)
+        x = self.layer_Dict['Dropout'](x)
+        x = self.layer_Dict['Conv'](x)
+        x = self.layer_Dict['Project'](x)
+        
+        return x.squeeze(1)
 
     def apply_weight_norm(self):
         def _apply_weight_norm(m):
@@ -375,7 +414,7 @@ class UpsampleNet(torch.nn.Module):
                 ))  # [Batch, 1, Mel_dim, Scaled_Time]
         self.layer.add_module('Squeeze', Squeeze(dim= 1))    # [Batch, Mel_dim, Scaled_Time]
 
-    def forward(self, x):        
+    def forward(self, x):
         return self.layer(x)
 
 class ResConvGLU(torch.nn.Module):
@@ -440,16 +479,16 @@ class ResConvGLU(torch.nn.Module):
         residuals = audios
 
         audios = self.layer_Dict['Conv1d'](audios)
-        audios_Tanh, audios_Sigmoid = audios.split(audios.size(1) // 2, dim= 1)
+        audios_Tanh, audios_Sigmoid = audios.chunk(2, dim= 1)
 
         auxs = self.layer_Dict['Aux'](auxs)
-        auxs_Tanh, auxs_Sigmoid = auxs.split(auxs.size(1) // 2, dim= 1)
+        auxs_Tanh, auxs_Sigmoid = auxs.chunk(2, dim= 1)
 
         singers = self.layer_Dict['Singer'](singers)
-        singers_Tanh, singers_Sigmoid = singers.split(singers.size(1) // 2, dim= 1)
+        singers_Tanh, singers_Sigmoid = singers.chunk(2, dim= 1)
 
         pitches = self.layer_Dict['Pitch'](pitches)
-        pitches_Tanh, pitches_Sigmoid = pitches.split(pitches.size(1) // 2, dim= 1)
+        pitches_Tanh, pitches_Sigmoid = pitches.chunk(2, dim= 1)
 
         audios_Tanh = torch.tanh(audios_Tanh + auxs_Tanh + singers_Tanh + pitches_Tanh)
         audios_Sigmoid = torch.sigmoid(audios_Sigmoid + auxs_Sigmoid + singers_Sigmoid + pitches_Sigmoid)
@@ -477,7 +516,7 @@ class Encoder_Block(torch.nn.Module):
             self.layer.add_module('Layer_{}'.format(index), Encoder_Layer(
                 channels= channels,
                 kernel_size= kernel_size,
-                dilation= 2 ** index,
+                dilation= 1,
                 dropout= dropout,
                 bias= bias
                 ))
@@ -497,12 +536,6 @@ class Encoder_Layer(torch.nn.Module):
         super(Encoder_Layer, self).__init__()
 
         self.layer = torch.nn.Sequential()
-        self.layer.add_module('ReLU_0', torch.nn.ReLU(
-            # inplace= True
-            ))
-        self.layer.add_module('Dropout_0', torch.nn.Dropout(
-            p= dropout
-            ))
         self.layer.add_module('Conv_0', Conv1d(
             in_channels= channels,
             out_channels= channels,
@@ -511,18 +544,21 @@ class Encoder_Layer(torch.nn.Module):
             dilation= dilation,
             bias= bias
             ))
-        self.layer.add_module('ReLU_1', torch.nn.ReLU(
-            # inplace= True
-            ))
-        self.layer.add_module('Dropout_1', torch.nn.Dropout(
+        self.layer.add_module('ReLU_0', torch.nn.ReLU())
+        self.layer.add_module('Dropout_0', torch.nn.Dropout(
             p= dropout
             ))
         self.layer.add_module('Conv_1', Conv1d1x1(
             in_channels= channels,
             out_channels= channels,
-            bias= bias
+            bias= bias,
+            w_init_gain= 'tanh'
             ))
-        self.layer.add_module('Tanh', torch.nn.Tanh())
+        # self.layer.add_module('ReLU_1', torch.nn.ReLU())
+        self.layer.add_module('Tanh_1', torch.nn.Tanh())
+        self.layer.add_module('Dropout_1', torch.nn.Dropout(
+            p= dropout
+            ))
 
     def forward(self, x):
         return self.layer(x)
@@ -622,31 +658,40 @@ class Stretch2d(torch.nn.Module):
             )
 
 class Conv1d(torch.nn.Conv1d):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, w_init_gain= 'relu', *args, **kwargs):
+        self.w_init_gain = w_init_gain
         super(Conv1d, self).__init__(*args, **kwargs)
 
     def reset_parameters(self):
-        torch.nn.init.kaiming_normal_(self.weight, nonlinearity='relu')
+        if self.w_init_gain in ['relu', 'leaky_relu']:
+            torch.nn.init.kaiming_uniform_(self.weight, nonlinearity= self.w_init_gain)
+        else:
+            torch.nn.init.xavier_uniform_(self.weight, gain= torch.nn.init.calculate_gain(self.w_init_gain))
         if not self.bias is None:
             torch.nn.init.zeros_(self.bias)
 
 class Conv1d1x1(Conv1d):
-    def __init__(self, in_channels, out_channels, bias):
+    def __init__(self, in_channels, out_channels, bias, w_init_gain= 'relu'):
         super(Conv1d1x1, self).__init__(
             in_channels= in_channels,
             out_channels= out_channels,
             kernel_size= 1,
             padding= 0,
             dilation= 1,
-            bias= bias
+            bias= bias,
+            w_init_gain= w_init_gain
             )
 
 class Conv2d(torch.nn.Conv2d):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, w_init_gain= 'relu', *args, **kwargs):
+        self.w_init_gain = w_init_gain
         super(Conv2d, self).__init__(*args, **kwargs)
 
     def reset_parameters(self):
-        self.weight.data.fill_(1.0 / np.prod(self.kernel_size))
+        if self.w_init_gain in ['relu', 'leaky_relu']:
+            torch.nn.init.kaiming_uniform_(self.weight, nonlinearity= self.w_init_gain)
+        else:
+            torch.nn.init.xavier_uniform_(self.weight, gain= torch.nn.init.calculate_gain(self.w_init_gain))
         if not self.bias is None:
             torch.nn.init.zeros_(self.bias)
 
@@ -665,29 +710,6 @@ class Unsqueeze(torch.nn.Module):
 
     def forward(self, x):
         return torch.unsqueeze(x, dim= self.dim)
-
-class Average(torch.nn.Module):
-    def __init__(self, dim):
-        super(Average, self).__init__()
-        self.dim = dim
-
-    def forward(self, x):
-        return torch.mean(x, dim= self.dim)
-
-class LinearUpsample1D(torch.nn.Module):
-    def __init__(self, scale):
-        super(LinearUpsample1D, self).__init__()
-        self.layer = torch.nn.Sequential()
-        self.layer.add_module('Unsqueeze', Unsqueeze(dim= 1))   # [Batch, 1, time]
-        self.layer.add_module('Upsample', torch.nn.Upsample(
-            scale_factor= scale,
-            mode= 'linear',
-            align_corners=True
-            ))
-        self.layer.add_module('Squeeze', Squeeze(dim= 1))   # [Batch, 1, time]
-
-    def forward(self, x):
-        return self.layer(x)
 
 
 if __name__ == "__main__":

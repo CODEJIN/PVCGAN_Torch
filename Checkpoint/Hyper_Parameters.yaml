@@ -1,0 +1,108 @@
+Sound:
+    Spectrogram_Dim: 1025
+    Mel_Dim: 80
+    Frame_Length: 1024
+    Frame_Shift: 256
+    Sample_Rate: 24000
+    Mel_F_Min: 0
+    Mel_F_Max: 12000
+    Max_Abs_Mel: 4
+    Confidence_Threshold: 0.6
+    Gaussian_Smoothing_Sigma: 0.0
+
+Num_Singers: 12
+
+Encoder:
+    Blocks: 2
+    Stacks_in_Block: 3
+    Channels: 128
+    Kernel_Size: 3
+    Dropout_Rate: 0.0
+
+Singer_Classification:
+    Dropout_Rate: 0.2
+    Channels: [100, 100]
+    Kernel_Size: [3, 3]
+
+Pitch_Regression:
+    Dropout_Rate: 0.2
+    Channels: [100, 100]
+    Kernel_Size: [3, 3]
+
+WaveNet:
+    Residual_Channels: 64
+    ResConvGLU:
+        Blocks: 3
+        Stacks_in_Block: 10
+        Gate_Channels: 128
+        Kernel_Size: 3
+        Skip_Channels: 64
+        Dropout_Rate: 0.0
+    Upsample:
+        Scales: [4, 4, 4, 4]
+        Pad: 2
+    Singer_Embedding: 64
+
+Discriminator:
+    Stacks: 10
+    Channels: 64
+    Kernel_Size: 3
+
+STFT_Loss_Resolution:
+    FFT_Sizes: [1024, 2048, 512]
+    Shfit_Lengths: [120, 240, 50]
+    Win_Lengths: [600, 1200, 240]
+
+
+# About `Train/Shared_Train_and_Eval`
+# This function is used because the pattern amount of music vocal dataset like NUS-48 is usually small.
+# When this value is true, the initial 'Wav_Length * 5' length of each train pattern is excluded in training.
+# At the same time, the initial 'Wav_Length * 5' length of each eval pattern is only used in evaluation.
+Train:
+    Shared_Train_and_Eval: true
+    Train_Pattern:
+        Path: 'C:/Pattern/PN.Pattern.NUS48E'
+        Metadata_File: 'METADATA.PICKLE'
+        Mixup:
+            Use: true
+            Min_Beta: 0.3
+            Max_Beta: 0.7
+            Apply_Delay: 0
+        Back_Translate:
+            Use: true
+            Apply_Delay: 0
+        Accumulated_Dataset_Epoch: 50    # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
+    Eval_Pattern:
+        Path: 'C:/Pattern/PN.Pattern.NUS48E'
+        Metadata_File: 'METADATA.PICKLE'
+    Num_Workers: 2
+    Batch_Size: 8
+    Wav_Length: 25600
+    Max_Pattern_Queue: 100
+    Learning_Rate:
+        Initial: 1.0e-3
+        Base: 4000
+    Discriminator_Delay: 100000 # When all delay was 0, failed.
+    ADAM:
+        Beta1: 0.9
+        Beta2: 0.999
+        Epsilon: 1.0e-7
+    Adversarial_Weight: # The values are bigger than 1.0, Generator and Encoder have advantage.
+        Discriminator: 1.0
+        Singer_Classification: 0.1
+        Pitch_Regression: 0.7   # 0.8 TO 1.0 was failed.
+    Gradient_Norm: 1.0
+    Weight_Decay: 1.0e-6
+    Max_Step: 400000
+    Checkpoint_Save_Interval: 1000
+    Logging_Interval: 50
+    Evaluation_Interval: 1000
+    Inference_Interval: 5000
+    Initial_Inference: false
+
+Inference_Batch_Size: 4
+Use_Mixed_Precision: false  #Model was dead when using 16bit.
+Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Inference'
+Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Checkpoint'
+Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Log'
+Device: '0'

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from Audio import Audio_Prep, Mel_Generate
 from yin import pitch_calc
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 using_Extension = [x.upper() for x in ['.wav', '.m4a', '.flac']]
@@ -82,7 +82,7 @@ def Pattern_File_Generate(path, keyword_Index_Dict, dataset, file_Prefix='', top
                 '.INV' if invert else '',
                 ).upper()
 
-            with open(os.path.join(hp_Dict['Train']['Pattern_Path'], pickle_File_Name).replace("\\", "/"), 'wb') as f:
+            with open(os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], pickle_File_Name).replace("\\", "/"), 'wb') as f:
                 pickle.dump(new_Pattern_Dict, f, protocol=4)
 
 
@@ -140,11 +140,11 @@ def Metadata_Generate(keyword_Index_Dict):
         }
 
     files_TQDM = tqdm(
-        total= sum([len(files) for root, _, files in os.walk(hp_Dict['Train']['Pattern_Path'])]),
+        total= sum([len(files) for root, _, files in os.walk(hp_Dict['Train']['Train_Pattern']['Path'])]),
         desc= 'Metadata'
         )
 
-    for root, _, files in os.walk(hp_Dict['Train']['Pattern_Path']):
+    for root, _, files in os.walk(hp_Dict['Train']['Train_Pattern']['Path']):
         for file in files:
             with open(os.path.join(root, file).replace("\\", "/"), "rb") as f:
                 pattern_Dict = pickle.load(f)                
@@ -158,13 +158,16 @@ def Metadata_Generate(keyword_Index_Dict):
                     print('File \'{}\' is not correct pattern file. This file is ignored.'.format(file))
                 files_TQDM.update(1)
 
-    with open(os.path.join(hp_Dict['Train']['Pattern_Path'], hp_Dict['Train']['Metadata_File'].upper()).replace("\\", "/"), 'wb') as f:
+    with open(os.path.join(hp_Dict['Train']['Train_Pattern']['Path'], hp_Dict['Train']['Train_Pattern']['Metadata_File'].upper()).replace("\\", "/"), 'wb') as f:
         pickle.dump(new_Metadata_Dict, f, protocol=2)
 
     print('Metadata generate done.')
 
 
 if __name__ == "__main__":
+    hp_Dict['Train']['Train_Pattern']['Path'] = 'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing'
+
+
     argParser = argparse.ArgumentParser()
     argParser.add_argument('-nus48e', '--nus48e_path', required=False)
     argParser.add_argument('-sex', '--sex_type', required= False, default= 'B')
@@ -191,7 +194,7 @@ if __name__ == "__main__":
     if total_Pattern_Count == 0:
         raise ValueError('Total pattern count is zero.')
     
-    os.makedirs(hp_Dict['Train']['Pattern_Path'], exist_ok= True)
+    os.makedirs(hp_Dict['Train']['Train_Pattern']['Path'], exist_ok= True)
     
     if not args.nus48e_path is None:
         for index, file_Path in tqdm(

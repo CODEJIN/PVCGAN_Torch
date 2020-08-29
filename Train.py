@@ -3,7 +3,7 @@ import numpy as np
 import logging, yaml, os, sys, argparse, time, math
 from tqdm import tqdm
 from collections import defaultdict
-from tensorboardX import SummaryWriter
+from Logger import Logger
 import matplotlib
 matplotlib.use('agg')
 matplotlib.rcParams['agg.path.chunksize'] = 10000
@@ -12,14 +12,14 @@ from scipy.io import wavfile
 from random import choice
 
 from Modules import PVCGAN, MultiResolutionSTFTLoss
-from Datasets import AccumulationDataset, TrainDataset, DevDataset, Accumulation_Collater, Train_Collater, Dev_Collater
+from Datasets import Train_Dataset, Dev_Dataset, Accumulation_Dataset, Inference_Dataset, Collater, Accumulation_Collater, Inference_Collater
 from Radam import RAdam
 from Noam_Scheduler import Modified_Noam_Scheduler
 
 from Pattern_Generator import Pattern_Generate
 from yin import pitch_calc
 
-with open('Hyper_Parameter.yaml') as f:
+with open('Hyper_Parameters.yaml') as f:
     hp_Dict = yaml.load(f, Loader=yaml.Loader)
 
 if not hp_Dict['Device'] is None:
@@ -33,7 +33,7 @@ else:
     torch.cuda.set_device(0)
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO, # level=logging.DEBUG,
     stream=sys.stdout,
     format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
     )
@@ -59,46 +59,55 @@ class Trainer:
             }
 
         self.writer_Dict = {
-            'Train': SummaryWriter(os.path.join(hp_Dict['Log_Path'], 'Train')),
-            'Evaluation': SummaryWriter(os.path.join(hp_Dict['Log_Path'], 'Evaluation')),
+            'Train': Logger(os.path.join(hp_Dict['Log_Path'], 'Train')),
+            'Evaluation': Logger(os.path.join(hp_Dict['Log_Path'], 'Evaluation')),
             }
 
         self.Load_Checkpoint()
 
     def Datset_Generate(self):
-        accumulation_Dataset = AccumulationDataset()
-        train_Dataset = TrainDataset()
-        dev_Dataset = DevDataset()
-        logging.info('The number of base train files = {}.'.format(len(accumulation_Dataset)))
-        logging.info('The number of train patterns = {}.'.format(len(train_Dataset)))
+        train_Dataset = Train_Dataset()
+        accumulation_Dataset = Accumulation_Dataset()
+        dev_Dataset = Dev_Dataset()
+        inference_Dataset = Inference_Dataset()
+        logging.info('The number of base train files = {}.'.format(len(train_Dataset) // hp_Dict['Train']['Train_Pattern']['Accumulated_Dataset_Epoch']))
         logging.info('The number of development patterns = {}.'.format(len(dev_Dataset)))
+        logging.info('The number of inference patterns = {}.'.format(len(inference_Dataset)))
 
+        collater = Collater()
         accumulation_Collater = Accumulation_Collater()
-        train_Collater = Train_Collater()
-        dev_Collater = Dev_Collater()
+        inference_Collater = Inference_Collater()
 
         self.dataLoader_Dict = {}
-        self.dataLoader_Dict['Accumulation'] = torch.utils.data.DataLoader(
-            dataset= accumulation_Dataset,
+        self.dataLoader_Dict['Train'] = torch.utils.data.DataLoader(
+            dataset= train_Dataset,
             shuffle= True,
-            collate_fn= accumulation_Collater,
+            collate_fn= collater,
             batch_size= hp_Dict['Train']['Batch_Size'],
             num_workers= hp_Dict['Train']['Num_Workers'],
             pin_memory= True
             )
-        self.dataLoader_Dict['Train'] = torch.utils.data.DataLoader(
-            dataset= train_Dataset,
-            shuffle= True,
-            collate_fn= train_Collater,
+        self.dataLoader_Dict['Accumulation'] = torch.utils.data.DataLoader(
+            dataset= accumulation_Dataset,
+            shuffle= False,
+            collate_fn= accumulation_Collater,
             batch_size= hp_Dict['Train']['Batch_Size'],
             num_workers= hp_Dict['Train']['Num_Workers'],
             pin_memory= True
             )
         self.dataLoader_Dict['Dev'] = torch.utils.data.DataLoader(
             dataset= dev_Dataset,
-            shuffle= False,
-            collate_fn= dev_Collater,
+            shuffle= True,  # to write tensorboard.
+            collate_fn= collater,
             batch_size= hp_Dict['Train']['Batch_Size'],
+            num_workers= hp_Dict['Train']['Num_Workers'],
+            pin_memory= True
+            )
+        self.dataLoader_Dict['Inference'] = torch.utils.data.DataLoader(
+            dataset= inference_Dataset,
+            shuffle= False,  # to write tensorboard.
+            collate_fn= inference_Collater,
+            batch_size= hp_Dict['Inference_Batch_Size'] or hp_Dict['Train']['Batch_Size'],
             num_workers= hp_Dict['Train']['Num_Workers'],
             pin_memory= True
             )
@@ -121,6 +130,7 @@ class Trainer:
             lr= hp_Dict['Train']['Learning_Rate']['Initial'],
             betas=(hp_Dict['Train']['ADAM']['Beta1'], hp_Dict['Train']['ADAM']['Beta2']),
             eps= hp_Dict['Train']['ADAM']['Epsilon'],
+            weight_decay= hp_Dict['Train']['Weight_Decay']
             )
         self.scheduler = Modified_Noam_Scheduler(
             optimizer= self.optimizer,
@@ -138,15 +148,15 @@ class Trainer:
     def Train_Step(self, audios, mels, pitches, audio_Singers, mel_Singers, noises):
         loss_Dict = {}
 
-        audios = audios.to(device)
-        mels = mels.to(device)
-        pitches = pitches.to(device)
-        audio_Singers = audio_Singers.to(device)
-        mel_Singers = mel_Singers.to(device)
-        noises = noises.to(device)
+        audios = audios.to(device, non_blocking=True)
+        mels = mels.to(device, non_blocking=True)
+        pitches = pitches.to(device, non_blocking=True)
+        audio_Singers = audio_Singers.to(device, non_blocking=True)
+        mel_Singers = mel_Singers.to(device, non_blocking=True)
+        noises = noises.to(device, non_blocking=True)
 
         # Generator
-        fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
+        fakes, predicted_Singers, predicted_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
             mels= mels,
             pitches= pitches,
             singers= audio_Singers,
@@ -158,19 +168,19 @@ class Trainer:
         loss_Dict['Generator/Spectral_Convergence'], loss_Dict['Generator/Magnitude'] = self.criterion_Dict['STFT'](fakes, audios)
         loss_Dict['Generator'] = loss_Dict['Generator/Spectral_Convergence'] + loss_Dict['Generator/Magnitude']
         
-        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
-        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
-        loss_Dict['Confuser'] = \
-            hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Confuser/Singer'] + \
-            hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
+        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](predicted_Singers, mel_Singers)
+        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](predicted_Pitches, pitches)
+        loss_Dict['Confuser'] =  loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
+        loss = loss_Dict['Generator'] + loss_Dict['Confuser']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # As the discriminator, negative is correct.
-            loss_Dict['Discriminator/Real'] = -torch.mean(reals_Discriminations)  # As the discriminator, positive is correct.
+            loss_Dict['Discriminator/Fake'] = self.criterion_Dict['MSE'](fakes_Discriminations, torch.zeros_like(fakes_Discriminations))   # Discriminator thinks that 0 is correct.
+            loss_Dict['Discriminator/Real'] = self.criterion_Dict['MSE'](reals_Discriminations, torch.ones_like(reals_Discriminations))  # Discriminator thinks that 1 is correct.
+
             loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
+            loss += loss_Dict['Discriminator']
                 
         self.optimizer.zero_grad()
-        loss = loss_Dict['Generator'] + loss_Dict['Confuser'] + hp_Dict['Train']['Adversarial_Weight']['Discriminator'] * loss_Dict['Discriminator']
 
         if hp_Dict['Use_Mixed_Precision']:
             with amp.scale_loss(loss, self.optimizer) as scaled_loss:
@@ -185,7 +195,7 @@ class Trainer:
                 parameters= self.model.parameters(),
                 max_norm= hp_Dict['Train']['Gradient_Norm']
                 )
-
+        
         self.optimizer.step()
         self.scheduler.step()
 
@@ -197,12 +207,12 @@ class Trainer:
 
     def Train_Epoch(self):
         if any([
-            hp_Dict['Train']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Mixup']['Apply_Delay'],
-            hp_Dict['Train']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Back_Translate']['Apply_Delay']
+            hp_Dict['Train']['Train_Pattern']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Mixup']['Apply_Delay'],
+            hp_Dict['Train']['Train_Pattern']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Back_Translate']['Apply_Delay']
             ]):
             self.Data_Accumulation()
 
-        for step, (audios, mels, pitches, audio_Singers, mel_Singers, noises) in enumerate(self.dataLoader_Dict['Train'], 1):
+        for audios, mels, pitches, audio_Singers, mel_Singers, noises in self.dataLoader_Dict['Train']:
             self.Train_Step(audios, mels, pitches, audio_Singers, mel_Singers, noises)
             
             if self.steps % hp_Dict['Train']['Checkpoint_Save_Interval'] == 0:
@@ -214,16 +224,20 @@ class Trainer:
                     for tag, loss in self.scalar_Dict['Train'].items()
                         }
                 self.scalar_Dict['Train']['Learning_Rate'] = self.scheduler.get_last_lr()
-                self.Write_to_Tensorboard('Train', self.scalar_Dict['Train'])
+                self.writer_Dict['Train'].add_scalar_dict(self.scalar_Dict['Train'], self.steps)
                 self.scalar_Dict['Train'] = defaultdict(float)
 
             if self.steps % hp_Dict['Train']['Evaluation_Interval'] == 0:
                 self.Evaluation_Epoch()
             
+            if self.steps % hp_Dict['Train']['Inference_Interval'] == 0:
+                self.Inference_Epoch()
+            
+            
             if self.steps >= hp_Dict['Train']['Max_Step']:
                 return
 
-        self.epochs += hp_Dict['Train']['Accumulation_Inverval']
+        self.epochs += hp_Dict['Train']['Train_Pattern']['Accumulated_Dataset_Epoch']
 
     
     @torch.no_grad()
@@ -238,7 +252,7 @@ class Trainer:
         noises = noises.to(device, non_blocking=True)
 
         # Generator
-        fakes, classified_Singers, classified_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
+        fakes, predicted_Singers, predicted_Pitches, fakes_Discriminations, reals_Discriminations = self.model(
             mels= mels,
             pitches= pitches,
             singers= audio_Singers,
@@ -250,22 +264,58 @@ class Trainer:
         loss_Dict['Generator/Spectral_Convergence'], loss_Dict['Generator/Magnitude'] = self.criterion_Dict['STFT'](fakes, audios)
         loss_Dict['Generator'] = loss_Dict['Generator/Spectral_Convergence'] + loss_Dict['Generator/Magnitude']
         
-        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](classified_Singers, mel_Singers)
-        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](classified_Pitches, pitches)
-        loss_Dict['Confuser'] = \
-            hp_Dict['Train']['Adversarial_Weight']['Singer_Classification'] * loss_Dict['Confuser/Singer'] + \
-            hp_Dict['Train']['Adversarial_Weight']['Pitch_Regression'] * loss_Dict['Confuser/Pitch']
+        loss_Dict['Confuser/Singer'] = self.criterion_Dict['CE'](predicted_Singers, mel_Singers)
+        loss_Dict['Confuser/Pitch'] = self.criterion_Dict['MAE'](predicted_Pitches, pitches)
+        loss_Dict['Confuser'] =  loss_Dict['Confuser/Singer'] + loss_Dict['Confuser/Pitch']
+        loss = loss_Dict['Generator'] + loss_Dict['Confuser']
 
         if self.steps >= hp_Dict['Train']['Discriminator_Delay']:
-            loss_Dict['Discriminator/Fake'] = torch.mean(fakes_Discriminations)   # As the discriminator, negative is correct.
-            loss_Dict['Discriminator/Real'] = -torch.mean(reals_Discriminations)  # As the discriminator, positive is correct.
-            loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
+            loss_Dict['Discriminator/Fake'] = self.criterion_Dict['MSE'](fakes_Discriminations, torch.zeros_like(fakes_Discriminations))   # Discriminator thinks that 0 is correct.
+            loss_Dict['Discriminator/Real'] = self.criterion_Dict['MSE'](reals_Discriminations, torch.ones_like(reals_Discriminations))  # Discriminator thinks that 1 is correct.
 
+            loss_Dict['Discriminator'] = loss_Dict['Discriminator/Fake'] + loss_Dict['Discriminator/Real']
+            loss += loss_Dict['Discriminator']
+            
         for tag, loss in loss_Dict.items():
             self.scalar_Dict['Evaluation']['Loss/{}'.format(tag)] += loss
 
+        return fakes, predicted_Singers, predicted_Pitches
+
+    def Evaluation_Epoch(self):
+        logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
+
+        self.model.eval()
+
+        for step, (audios, mels, pitches, audio_Singers, mel_Singers, noises) in tqdm(
+            enumerate(self.dataLoader_Dict['Dev'], 1),
+            desc='[Evaluation]',
+            total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp_Dict['Train']['Batch_Size'])
+            ):
+            fakes, predicted_Singers, predicted_Pitches = self.Evaluation_Step(audios, mels, pitches, audio_Singers, mel_Singers, noises)
+
+        self.scalar_Dict['Evaluation'] = {
+            tag: loss / step
+            for tag, loss in self.scalar_Dict['Evaluation'].items()
+            }
+        self.writer_Dict['Evaluation'].add_scalar_dict(self.scalar_Dict['Evaluation'], self.steps)
+        self.writer_Dict['Evaluation'].add_histogram_model(self.model, self.steps, delete_keywords=['layer_Dict', '1', 'layer'])
+        self.scalar_Dict['Evaluation'] = defaultdict(float)
+
+        self.writer_Dict['Evaluation'].add_image_dict({
+            'Mel': (mels[-1].cpu().numpy(), None),
+            'Audio/Original': (audios[-1].cpu().numpy(), None),
+            'Audio/Predicted': (fakes[-1].cpu().numpy(), None),
+            'Pitch/Original': (pitches[-1].cpu().numpy(), None),
+            'Pitch/Predicted': (predicted_Pitches[-1].cpu().numpy(), None),
+            'Singer/Original': (torch.nn.functional.one_hot(mel_Singers, hp_Dict['Num_Singers']).cpu().numpy(), None),
+            'Singer/Predicted': (torch.softmax(predicted_Singers, dim= -1).cpu().numpy(), None),
+            }, self.steps)
+        
+        self.model.train()
+
+
     @torch.no_grad()
-    def Inference_Step(self, audios, mels, pitches, singers, noises, source_Labels, conversion_Labels, start_Index= 0, tag_step= False, tag_Index= False):
+    def Inference_Step(self, audios, mels, pitches, singers, noises, source_Labels, singer_Labels, start_Index= 0, tag_step= False, tag_Index= False):
         audios = audios.to(device, non_blocking=True)
         mels = mels.to(device, non_blocking=True)
         pitches = pitches.to(device, non_blocking=True)
@@ -280,30 +330,30 @@ class Trainer:
             )
 
         files = []
-        for index, (source_Label, conversion_Label) in enumerate(zip(source_Labels, conversion_Labels)):
+        for index, (source_Label, singer_Label) in enumerate(zip(source_Labels, singer_Labels)):
             tags = []
             if tag_step: tags.append('Step-{}'.format(self.steps))
-            tags.append('{}_to_{}'.format(source_Label, conversion_Label))
+            tags.append('{}_to_{}'.format(source_Label, singer_Label))
             if tag_Index: tags.append('IDX_{}'.format(index + start_Index))
             files.append('.'.join(tags))
 
         os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG').replace('\\', '/'), exist_ok= True)
         os.makedirs(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'WAV').replace("\\", "/"), exist_ok= True)
-        for index, (real, fake, source_Label, conversion_Label, file) in enumerate(zip(
+        for index, (real, fake, source_Label, singer_Label, file) in enumerate(zip(
             audios.cpu().numpy(),
             fakes.cpu().numpy(),
             source_Labels,
-            conversion_Labels,
+            singer_Labels,
             files
             )):
             new_Figure = plt.figure(figsize=(80, 10 * 2), dpi=100)
             plt.subplot(211)
             plt.plot(real)
-            plt.title('Original wav    Index: {}    {} -> {}'.format(index + start_Index, source_Label, conversion_Label))
-            plt.subplot(212)            
+            plt.title('Original wav    Index: {}    {} -> {}'.format(index + start_Index, source_Label, singer_Label))
+            plt.subplot(212)
             plt.plot(fake)
-            plt.title('Fake wav    Index: {}    {} -> {}'.format(index + start_Index, source_Label, conversion_Label))
-            plt.tight_layout()            
+            plt.title('Fake wav    Index: {}    {} -> {}'.format(index + start_Index, source_Label, singer_Label))
+            plt.tight_layout()
             plt.savefig(os.path.join(hp_Dict['Inference_Path'], 'Step-{}'.format(self.steps), 'PNG', '{}.png'.format(file)).replace('\\', '/'))
             plt.close(new_Figure)
 
@@ -313,27 +363,18 @@ class Trainer:
                 rate= hp_Dict['Sound']['Sample_Rate']
                 )
 
-    def Evaluation_Epoch(self):
-        logging.info('(Steps: {}) Start evaluation.'.format(self.steps))
+    def Inference_Epoch(self):
+        logging.info('(Steps: {}) Start inference.'.format(self.steps))
 
         self.model.eval()
 
-        for step, (audios, mels, pitches, original_Singers, conversion_Singers, noises, source_Labels, conversion_Labels) in tqdm(
-            enumerate(self.dataLoader_Dict['Dev'], 1),
-            desc='[Evaluation]',
-            total= math.ceil(len(self.dataLoader_Dict['Dev'].dataset) / hp_Dict['Train']['Batch_Size'])
+        for step, (audios, mels, pitches, singers, noises, source_Labels, singer_Labels) in tqdm(
+            enumerate(self.dataLoader_Dict['Inference'], 1),
+            desc='[Inference]',
+            total= math.ceil(len(self.dataLoader_Dict['Inference'].dataset) / (hp_Dict['Inference_Batch_Size'] or hp_Dict['Train']['Batch_Size']))
             ):
-            self.Evaluation_Step(audios, mels, pitches, original_Singers, original_Singers, noises)
-            self.Inference_Step(audios, mels, pitches, conversion_Singers, noises, source_Labels, conversion_Labels, start_Index= (step - 1) * hp_Dict['Train']['Batch_Size'])
+            self.Inference_Step(audios, mels, pitches, singers, noises, source_Labels, singer_Labels, start_Index= (step - 1) * hp_Dict['Train']['Batch_Size'])
 
-        self.scalar_Dict['Evaluation'] = {
-            tag: loss / step
-            for tag, loss in self.scalar_Dict['Evaluation'].items()
-            }
-        self.Write_to_Tensorboard('Evaluation', self.scalar_Dict['Evaluation'])
-        self.scalar_Dict['Evaluation'] = defaultdict(float)
-
-        
         self.model.train()
 
 
@@ -359,8 +400,8 @@ class Trainer:
             offset1 = np.random.randint(0, max_Offset)
             offset2 = np.random.randint(0, max_Offset)
             beta = np.random.uniform(
-                low= hp_Dict['Train']['Mixup']['Min_Beta'],
-                high= hp_Dict['Train']['Mixup']['Max_Beta'],
+                low= hp_Dict['Train']['Train_Pattern']['Mixup']['Min_Beta'],
+                high= hp_Dict['Train']['Train_Pattern']['Mixup']['Max_Beta'],
                 )
 
             new_Audio = \
@@ -393,9 +434,13 @@ class Trainer:
         print()
         mixup_List = []
         back_Translate_List = []
-        for total_Audios, total_Pitches, audios, mels, pitches, singers, noises in tqdm(self.dataLoader_Dict['Accumulation'], desc='[Accumulation]'):
+        for total_Audios, total_Pitches, audios, mels, pitches, singers, noises in tqdm(
+            self.dataLoader_Dict['Accumulation'],
+            desc='[Accumulation]',
+            total= math.ceil(len(self.dataLoader_Dict['Accumulation'].dataset) / hp_Dict['Train']['Batch_Size'])
+            ):
             #Mixup
-            if hp_Dict['Train']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Mixup']['Apply_Delay']:
+            if hp_Dict['Train']['Train_Pattern']['Mixup']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Mixup']['Apply_Delay']:
                 for audio, pitch, singer in zip(total_Audios, total_Pitches, singers.numpy()):
                     mixup_Audio, mixup_Mel, mixup_Pitch = Mixup(audio, pitch)
                     mixup_List.append((
@@ -407,7 +452,7 @@ class Trainer:
                         ))
             
             #Backtranslate
-            if hp_Dict['Train']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Back_Translate']['Apply_Delay']:
+            if hp_Dict['Train']['Train_Pattern']['Back_Translate']['Use'] and self.steps >= hp_Dict['Train']['Train_Pattern']['Back_Translate']['Apply_Delay']:
                 mel_Singers = torch.LongTensor(np.stack([
                     choice([x for x in range(hp_Dict['Num_Singers']) if x != singer])
                     for singer in singers
@@ -480,13 +525,16 @@ class Trainer:
         logging.info('Checkpoint saved at {} steps.'.format(self.steps))
 
     def Train(self):
-        if not os.path.exists(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameter.yaml')):
+        if not os.path.exists(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameters.yaml')):
             os.makedirs(hp_Dict['Checkpoint_Path'], exist_ok= True)
             with open(os.path.join(hp_Dict['Checkpoint_Path'], 'Hyper_Parameters.yaml').replace("\\", "/"), "w") as f:
                 yaml.dump(hp_Dict, f)
 
-        if hp_Dict['Train']['Initial_Inference']:
+        if self.steps == 0:
             self.Evaluation_Epoch()
+
+        if hp_Dict['Train']['Initial_Inference']:
+            self.Inference_Epoch()
 
         self.tqdm = tqdm(
             initial= self.steps,
@@ -503,10 +551,6 @@ class Trainer:
             
         self.tqdm.close()
         logging.info('Finished training.')
-
-    def Write_to_Tensorboard(self, category, scalar_Dict):
-        for tag, scalar in scalar_Dict.items():
-            self.writer_Dict[category].add_scalar(tag, scalar, self.steps)
 
 if __name__ == '__main__':
     argParser = argparse.ArgumentParser()
