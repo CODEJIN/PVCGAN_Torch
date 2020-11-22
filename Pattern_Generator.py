@@ -165,9 +165,6 @@ def Metadata_Generate(keyword_Index_Dict):
 
 
 if __name__ == "__main__":
-    hp_Dict['Train']['Train_Pattern']['Path'] = 'C:/Pattern/PN.Pattern.NUS48E_Pitch_Testing'
-
-
     argParser = argparse.ArgumentParser()
     argParser.add_argument('-nus48e', '--nus48e_path', required=False)
     argParser.add_argument('-sex', '--sex_type', required= False, default= 'B')

@@ -112,7 +112,7 @@ python Train.py -s <int>
     * Default is 0.
 
 # Result
-    * https://codejin.github.io/PVCGAN_Demo
+* https://codejin.github.io/PVCGAN_Demo
 
 # Trained checkpoint
 

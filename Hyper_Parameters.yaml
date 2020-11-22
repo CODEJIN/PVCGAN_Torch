@@ -61,7 +61,7 @@ STFT_Loss_Resolution:
 Train:
     Shared_Train_and_Eval: true
     Train_Pattern:
-        Path: 'C:/Pattern/PN.Pattern.NUS48E'
+        Path: 'E:/PN.Pattern.NUS48E'
         Metadata_File: 'METADATA.PICKLE'
         Mixup:
             Use: true
@@ -73,7 +73,7 @@ Train:
             Apply_Delay: 0
         Accumulated_Dataset_Epoch: 50    # This is to prevent slow down from torch.utils.data.DataLoader when the number of patterns is small.
     Eval_Pattern:
-        Path: 'C:/Pattern/PN.Pattern.NUS48E'
+        Path: 'E:/PN.Pattern.NUS48E'
         Metadata_File: 'METADATA.PICKLE'
     Num_Workers: 2
     Batch_Size: 8
@@ -102,7 +102,7 @@ Train:
 
 Inference_Batch_Size: 4
 Use_Mixed_Precision: false  #Model was dead when using 16bit.
-Inference_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Inference'
-Checkpoint_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Checkpoint'
-Log_Path: 'D:/PVCGAN.Results/24K.GRL.Results.P_7e-1.S_1e-1.MB_NoDelay/Log'
+Inference_Path: 'D:/PVCGAN.Results/Temp/Inference'
+Checkpoint_Path: 'D:/PVCGAN.Results/Temp/Checkpoint'
+Log_Path: 'D:/PVCGAN.Results/Temp/Log'
 Device: '0'
