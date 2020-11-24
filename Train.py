@@ -113,7 +113,7 @@ class Trainer:
             )
 
     def Model_Generate(self):
-        self.model = PVCGAN().to(device, )
+        self.model = PVCGAN().to(device)
         self.criterion_Dict = {
             'STFT': MultiResolutionSTFTLoss(
                 fft_sizes= hp_Dict['STFT_Loss_Resolution']['FFT_Sizes'],
