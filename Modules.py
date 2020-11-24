@@ -629,7 +629,7 @@ class STFTLoss(torch.nn.Module):
             n_fft= self.fft_size,
             hop_length= self.shift_length,
             win_length= self.win_length,
-            window= self.window(self.win_length)
+            window= self.window(self.win_length).to(x.device)
             )
         reals, imags = x_STFT[..., 0], x_STFT[..., 1]
 
